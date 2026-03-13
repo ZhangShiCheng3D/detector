@@ -455,6 +455,19 @@ int DetectDefects(void* detector, unsigned char* test_image,
                      << ", passed=" << (roi.passed ? "true" : "false")
                      << ", defect_count=" << roi.defects.size();
             API_LOG_DETECTION(roi_info.str());
+            
+            // 记录每个瑕疵的详细信息
+            for (size_t j = 0; j < roi.defects.size(); ++j) {
+                const auto& defect = roi.defects[j];
+                std::stringstream defect_info;
+                defect_info << "    Defect[" << j << "]: type=" << defectTypeToString(defect.defect_type)
+                           << "(" << static_cast<int>(defect.defect_type) << ")"
+                           << ", pos=[" << defect.x << "," << defect.y << "]"
+                           << ", size=[" << defect.location.width << "x" << defect.location.height << "]"
+                           << ", area=" << defect.area
+                           << ", severity=" << defect.severity;
+                API_LOG_DETECTION(defect_info.str());
+            }
         }
         
         API_LOG_DETECTION(det_info.str());
@@ -505,8 +518,31 @@ int DetectDefectsFromFile(void* detector, const char* filepath,
             *defect_count = result.total_defect_count;
         }
 
+        // 记录每个ROI的详细检测结果
+        for (const auto& roi_result : result.roi_results) {
+            std::stringstream roi_info;
+            roi_info << "  ROI[" << roi_result.roi_id << "]: similarity=" << roi_result.similarity
+                     << ", passed=" << (roi_result.passed ? "true" : "false")
+                     << ", defect_count=" << roi_result.defects.size();
+            API_LOG_DETECTION(roi_info.str());
+            
+            // 记录每个瑕疵的详细信息
+            for (size_t j = 0; j < roi_result.defects.size(); ++j) {
+                const auto& defect = roi_result.defects[j];
+                std::stringstream defect_info;
+                defect_info << "    Defect[" << j << "]: type=" << defectTypeToString(defect.defect_type)
+                           << "(" << static_cast<int>(defect.defect_type) << ")"
+                           << ", pos=[" << defect.x << "," << defect.y << "]"
+                           << ", size=[" << defect.location.width << "x" << defect.location.height << "]"
+                           << ", area=" << defect.area
+                           << ", severity=" << defect.severity;
+                API_LOG_DETECTION(defect_info.str());
+            }
+        }
+
         std::stringstream det_info;
-        det_info << "Detection from file completed: total_defects=" << result.total_defect_count
+        det_info << "Detection from file completed: roi_count=" << result.roi_results.size()
+                 << ", total_defects=" << result.total_defect_count
                  << ", overall_passed=" << (result.overall_passed ? "true" : "false")
                  << ", processing_time=" << result.processing_time_ms << "ms";
         API_LOG_DETECTION(det_info.str());
@@ -676,10 +712,34 @@ int DetectDefectsEx(void* detector, unsigned char* test_image,
             *actual_defect_count = result.total_defect_count;
         }
 
+        // 记录每个ROI的详细检测结果
+        for (const auto& roi_result : result.roi_results) {
+            std::stringstream roi_info;
+            roi_info << "  ROI[" << roi_result.roi_id << "]: similarity=" << roi_result.similarity
+                     << ", passed=" << (roi_result.passed ? "true" : "false")
+                     << ", defect_count=" << roi_result.defects.size();
+            API_LOG_DETECTION(roi_info.str());
+            
+            // 记录每个瑕疵的详细信息
+            for (size_t j = 0; j < roi_result.defects.size(); ++j) {
+                const auto& defect = roi_result.defects[j];
+                std::stringstream defect_info;
+                defect_info << "    Defect[" << j << "]: type=" << defectTypeToString(defect.defect_type)
+                           << "(" << static_cast<int>(defect.defect_type) << ")"
+                           << ", pos=[" << defect.x << "," << defect.y << "]"
+                           << ", size=[" << defect.location.width << "x" << defect.location.height << "]"
+                           << ", area=" << defect.area
+                           << ", severity=" << defect.severity;
+                API_LOG_DETECTION(defect_info.str());
+            }
+        }
+        
         std::stringstream det_info;
-        det_info << "Detection (extended) completed: total_defects=" << result.total_defect_count
+        det_info << "Detection (extended) completed: roi_count=" << result.roi_results.size()
+                 << ", total_defects=" << result.total_defect_count
                  << ", returned_defects=" << defect_idx
-                 << ", overall_passed=" << (result.overall_passed ? "true" : "false");
+                 << ", overall_passed=" << (result.overall_passed ? "true" : "false")
+                 << ", processing_time=" << result.processing_time_ms << "ms";
         API_LOG_DETECTION(det_info.str());
         
         int ret = result.overall_passed ? 0 : 1;
@@ -741,10 +801,34 @@ int DetectDefectsFromFileEx(void* detector, const char* filepath,
             *actual_defect_count = result.total_defect_count;
         }
 
+        // 记录每个ROI的详细检测结果
+        for (const auto& roi_result : result.roi_results) {
+            std::stringstream roi_info;
+            roi_info << "  ROI[" << roi_result.roi_id << "]: similarity=" << roi_result.similarity
+                     << ", passed=" << (roi_result.passed ? "true" : "false")
+                     << ", defect_count=" << roi_result.defects.size();
+            API_LOG_DETECTION(roi_info.str());
+            
+            // 记录每个瑕疵的详细信息
+            for (size_t j = 0; j < roi_result.defects.size(); ++j) {
+                const auto& defect = roi_result.defects[j];
+                std::stringstream defect_info;
+                defect_info << "    Defect[" << j << "]: type=" << defectTypeToString(defect.defect_type)
+                           << "(" << static_cast<int>(defect.defect_type) << ")"
+                           << ", pos=[" << defect.x << "," << defect.y << "]"
+                           << ", size=[" << defect.location.width << "x" << defect.location.height << "]"
+                           << ", area=" << defect.area
+                           << ", severity=" << defect.severity;
+                API_LOG_DETECTION(defect_info.str());
+            }
+        }
+
         std::stringstream det_info;
-        det_info << "Detection from file (extended) completed: total_defects=" << result.total_defect_count
+        det_info << "Detection from file (extended) completed: roi_count=" << result.roi_results.size()
+                 << ", total_defects=" << result.total_defect_count
                  << ", returned_defects=" << defect_idx
-                 << ", overall_passed=" << (result.overall_passed ? "true" : "false");
+                 << ", overall_passed=" << (result.overall_passed ? "true" : "false")
+                 << ", processing_time=" << result.processing_time_ms << "ms";
         API_LOG_DETECTION(det_info.str());
         
         int ret = result.overall_passed ? 0 : 1;
@@ -1234,6 +1318,28 @@ int DetectWithFullResult(void* detector, unsigned char* test_image,
         g_last_roi_comparison_time = cpp_result.roi_comparison_time_ms;
         g_last_detection_result = cpp_result;
 
+        // 记录每个ROI的详细检测结果
+        for (const auto& roi_result : cpp_result.roi_results) {
+            std::stringstream roi_info;
+            roi_info << "  ROI[" << roi_result.roi_id << "]: similarity=" << roi_result.similarity
+                     << ", passed=" << (roi_result.passed ? "true" : "false")
+                     << ", defect_count=" << roi_result.defects.size();
+            API_LOG_DETECTION(roi_info.str());
+            
+            // 记录每个瑕疵的详细信息
+            for (size_t j = 0; j < roi_result.defects.size(); ++j) {
+                const auto& defect = roi_result.defects[j];
+                std::stringstream defect_info;
+                defect_info << "    Defect[" << j << "]: type=" << defectTypeToString(defect.defect_type)
+                           << "(" << static_cast<int>(defect.defect_type) << ")"
+                           << ", pos=[" << defect.x << "," << defect.y << "]"
+                           << ", size=[" << defect.location.width << "x" << defect.location.height << "]"
+                           << ", area=" << defect.area
+                           << ", severity=" << defect.severity;
+                API_LOG_DETECTION(defect_info.str());
+            }
+        }
+
         // 填充C结构体
         result->overall_passed = cpp_result.overall_passed ? 1 : 0;
         result->total_defect_count = cpp_result.total_defect_count;
@@ -1284,6 +1390,28 @@ int DetectFromFileWithFullResult(void* detector, const char* filepath,
         g_last_roi_comparison_time = cpp_result.roi_comparison_time_ms;
         g_last_detection_result = cpp_result;
 
+        // 记录每个ROI的详细检测结果
+        for (const auto& roi_result : cpp_result.roi_results) {
+            std::stringstream roi_info;
+            roi_info << "  ROI[" << roi_result.roi_id << "]: similarity=" << roi_result.similarity
+                     << ", passed=" << (roi_result.passed ? "true" : "false")
+                     << ", defect_count=" << roi_result.defects.size();
+            API_LOG_DETECTION(roi_info.str());
+            
+            // 记录每个瑕疵的详细信息
+            for (size_t j = 0; j < roi_result.defects.size(); ++j) {
+                const auto& defect = roi_result.defects[j];
+                std::stringstream defect_info;
+                defect_info << "    Defect[" << j << "]: type=" << defectTypeToString(defect.defect_type)
+                           << "(" << static_cast<int>(defect.defect_type) << ")"
+                           << ", pos=[" << defect.x << "," << defect.y << "]"
+                           << ", size=[" << defect.location.width << "x" << defect.location.height << "]"
+                           << ", area=" << defect.area
+                           << ", severity=" << defect.severity;
+                API_LOG_DETECTION(defect_info.str());
+            }
+        }
+
         // 填充C结构体
         result->overall_passed = cpp_result.overall_passed ? 1 : 0;
         result->total_defect_count = cpp_result.total_defect_count;
@@ -1294,7 +1422,8 @@ int DetectFromFileWithFullResult(void* detector, const char* filepath,
         localizationInfoToCStruct(cpp_result.localization, &result->localization);
 
         std::stringstream det_info;
-        det_info << "Detection from file with full result completed: total_defects=" << cpp_result.total_defect_count
+        det_info << "Detection from file with full result completed: roi_count=" << cpp_result.roi_results.size()
+                 << ", total_defects=" << cpp_result.total_defect_count
                  << ", overall_passed=" << (cpp_result.overall_passed ? "true" : "false")
                  << ", processing_time=" << cpp_result.processing_time_ms << "ms";
         API_LOG_DETECTION(det_info.str());
