@@ -1,0 +1,12 @@
+{
+  "roi_count": 1,
+  "rois": [
+    {
+      "x": 618,
+      "y": 207,
+      "width": 141,
+      "height": 75,
+      "threshold": 0.50
+    }
+  ]
+}

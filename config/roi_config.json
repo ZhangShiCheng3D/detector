@@ -1,0 +1,33 @@
+{
+  "roi_count": 4,
+  "rois": [
+    {
+      "x": 1003,
+      "y": 1325,
+      "width": 97,
+      "height": 81,
+      "threshold": 0.50
+    },
+    {
+      "x": 1795,
+      "y": 619,
+      "width": 97,
+      "height": 81,
+      "threshold": 0.50
+    },
+    {
+      "x": 1494,
+      "y": 1305,
+      "width": 97,
+      "height": 81,
+      "threshold": 0.50
+    },
+    {
+      "x": 1311,
+      "y": 1095,
+      "width": 97,
+      "height": 81,
+      "threshold": 0.50
+    }
+  ]
+}

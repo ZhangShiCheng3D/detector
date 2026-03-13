@@ -1,0 +1,92 @@
+{
+    "visualization": {
+        "enabled": true,
+        "output_mode": "both",
+        "output_directory": "output",
+        
+        "elements": {
+            "roi_boxes": {
+                "enabled": true,
+                "pass_color": [0, 255, 0],
+                "fail_color": [0, 0, 255],
+                "line_thickness": 2
+            },
+            "defect_markers": {
+                "enabled": true,
+                "color": [255, 0, 255],
+                "line_thickness": 1,
+                "fill_alpha": 0.3
+            },
+            "similarity_scores": {
+                "enabled": true,
+                "font_scale": 0.6,
+                "font_thickness": 1,
+                "text_color": [255, 255, 255],
+                "background_enabled": true,
+                "background_color": [0, 0, 0]
+            },
+            "processing_info": {
+                "enabled": true,
+                "show_time": true,
+                "show_overall_status": true,
+                "show_defect_count": true,
+                "position": "top_left"
+            },
+            "difference_map": {
+                "enabled": false,
+                "colormap": "jet",
+                "alpha": 0.5
+            },
+            "side_by_side": {
+                "enabled": false,
+                "template_label": "Template",
+                "test_label": "Test Image"
+            }
+        },
+        
+        "save_options": {
+            "format": "jpg",
+            "quality": 95,
+            "filename_prefix": "result_",
+            "include_timestamp": true,
+            "save_failed_only": false
+        },
+        
+        "display_options": {
+            "window_name": "Defect Detection Result",
+            "auto_resize": true,
+            "max_display_width": 1920,
+            "max_display_height": 1080,
+            "wait_key_ms": 0
+        }
+    },
+    
+    "detection": {
+        "blur_kernel_size": 3,
+        "binary_threshold": 25,
+        "min_defect_size": 10,
+        "morphology_kernel_size": 3,
+        "similarity_threshold": 0.85,
+        "detect_black_on_white": true,
+        "detect_white_on_black": true,
+
+        "binary_detection": {
+            "enabled": true,
+            "auto_detect_binary": true,
+            "noise_filter_size": 2,
+            "edge_tolerance_pixels": 2,
+            "edge_diff_ignore_ratio": 0.05,
+            "min_significant_area": 20,
+            "area_diff_threshold": 0.001,
+            "overall_similarity_threshold": 0.95
+        }
+    },
+    
+    "performance": {
+        "enable_parallel": true,
+        "max_threads": 0,
+        "enable_gpu": false,
+        "log_timing": true
+    }
+}
+

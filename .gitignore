@@ -1,0 +1,107 @@
+# ==================== C++ 编译输出 ====================
+# 编译生成的文件
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+*.pdb
+*.ilk
+*.exp
+
+# 可执行文件（不含扩展名，Linux）
+/demo_cpp
+/demo
+
+# ==================== Visual Studio ====================
+# 用户特定文件
+*.user
+*.userosscache
+*.suo
+*.cache
+
+# VS 构建目录
+.vs/
+Debug/
+Release/
+x64/
+x86/
+ARM/
+ARM64/
+build/
+docs/
+
+# 构建日志和临时文件
+*.tlog
+*.lastbuildstate
+*.recipe
+*.log
+*.idb
+
+# ==================== CMake ====================
+# CMake 生成文件
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# CMake 构建目录
+build/
+out/
+out/build/
+
+# ==================== C# ====================
+# C# 编译输出
+bin/
+obj/
+*.csproj.user
+
+# ==================== 测试数据（大文件）====================
+# 大量测试图片（保留目录结构但忽略文件）
+data/**/*.bmp
+data/**/*.jpg
+data/**/*.png
+data/**/*.jpeg
+
+# 压缩包
+*.zip
+*.tar.gz
+*.rar
+
+# ==================== 输出目录 ====================
+# 检测结果输出
+output/
+!output/.gitkeep
+
+# ==================== IDE ====================
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+
+# CLion
+.idea/
+*.iml
+
+# ==================== 其他 ====================
+# 临时文件
+*.tmp
+*.temp
+*~
+*.swp
+*.swo
+*.md
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 文档生成
+docs/html/
+docs/latex/
