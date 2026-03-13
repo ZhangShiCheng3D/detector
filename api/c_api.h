@@ -585,6 +585,29 @@ EXPORT_API const char* GetLibraryVersion(void);
  */
 EXPORT_API const char* GetBuildInfo(void);
 
+// ==================== 日志控制接口 ====================
+
+/**
+ * @brief 设置API日志文件路径
+ * @param filepath 日志文件路径（UTF-8编码），如果为NULL则使用默认路径 "api_debug.log"
+ * @note 默认日志文件位于工作目录下的 api_debug.log
+ * @note 日志会自动追加到已有文件
+ */
+EXPORT_API void SetAPILogFile(const char* filepath);
+
+/**
+ * @brief 启用或禁用API日志
+ * @param enabled 1启用日志，0禁用日志
+ * @note 默认启用日志
+ */
+EXPORT_API void EnableAPILog(int enabled);
+
+/**
+ * @brief 清除当前日志文件内容
+ * @note 删除并重新创建日志文件
+ */
+EXPORT_API void ClearAPILog(void);
+
 #ifdef __cplusplus
 }
 #endif

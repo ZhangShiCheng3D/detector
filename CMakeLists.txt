@@ -142,6 +142,15 @@ target_link_libraries(test_api_v2
     ${OpenCV_LIBS}
 )
 
+# API Logger 测试程序
+add_executable(test_api_logger
+    tests/test_api_logger.cpp
+)
+target_link_libraries(test_api_logger
+    defect_detection
+    ${OpenCV_LIBS}
+)
+
 # C#风格演示程序（带CSV定位数据）
 add_executable(demo_cpp
     tests/demo_cpp.cpp
