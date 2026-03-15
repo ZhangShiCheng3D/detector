@@ -108,6 +108,7 @@ struct ProgramConfig {
     // 对齐参数
     bool autoAlignEnabled = true;      // 自动对齐使能
     AlignmentMode alignMode = AlignmentMode::ROI_ONLY;  // 对齐模式
+    bool useCsvAlignment = true;       // 使用CSV数据进行对齐（禁用则使用自动对齐）
     
     // ROI参数
     int roiCount = 4;                  // ROI数量（随机模式）
@@ -314,7 +315,8 @@ void printUsage(const char* prog) {
     std::cout << "对齐选项:\n";
     std::cout << "  --no-align          禁用自动对齐\n";
     std::cout << "  --align-full        使用全图对齐模式（更精确但更慢）\n";
-    std::cout << "  --align-roi         使用ROI对齐模式（更快，默认）\n\n";
+    std::cout << "  --align-roi         使用ROI对齐模式（更快，默认）\n";
+    std::cout << "  --no-csv            禁用CSV对齐，使用自动对齐\n\n";
     
     std::cout << "ROI选项:\n";
     std::cout << "  --manual-roi        启用手动ROI选择模式\n";
@@ -429,6 +431,8 @@ ProgramConfig parseArguments(int argc, char** argv) {
             config.alignMode = AlignmentMode::FULL_IMAGE;
         } else if (arg == "--align-roi") {
             config.alignMode = AlignmentMode::ROI_ONLY;
+        } else if (arg == "--no-csv") {
+            config.useCsvAlignment = false;
         }
         // ROI选项
         else if (arg == "--manual-roi") {
@@ -952,11 +956,15 @@ void setupSingleROI(DefectDetector& detector, const ProgramConfig& config) {
 void configureAlignment(DefectDetector& detector, const ProgramConfig& config) {
     std::cout << "Step 4: 配置对齐...\n";
     
-    // 配置自动对齐（作为CSV数据缺失时的后备方案）
+    // 配置自动对齐
     detector.enableAutoLocalization(config.autoAlignEnabled);
     detector.setAlignmentMode(config.alignMode);
     
-    std::cout << "  对齐方式: CSV外部数据（优先）+ 自动对齐（后备）\n";
+    if (config.useCsvAlignment) {
+        std::cout << "  对齐方式: CSV外部数据（优先）+ 自动对齐（后备）\n";
+    } else {
+        std::cout << "  对齐方式: 自动对齐（CSV已禁用）\n";
+    }
     
     if (config.autoAlignEnabled) {
         std::string modeStr;
@@ -966,10 +974,19 @@ void configureAlignment(DefectDetector& detector, const ProgramConfig& config) {
             case AlignmentMode::ROI_ONLY: modeStr = "ROI_ONLY (ROI区域对齐)"; break;
         }
         std::cout << "  自动对齐模式: " << modeStr << "\n";
-        std::cout << "  注意: 当CSV数据可用时将优先使用CSV数据对齐\n\n";
+        if (config.useCsvAlignment) {
+            std::cout << "  注意: 当CSV数据可用时将优先使用CSV数据对齐\n\n";
+        } else {
+            std::cout << "  注意: 纯自动对齐模式，CSV数据将被忽略\n\n";
+        }
     } else {
-        std::cout << "  自动对齐: 已禁用（完全依赖CSV数据）\n";
-        std::cout << "  警告: 无CSV数据时将不进行对齐！\n\n";
+        if (config.useCsvAlignment) {
+            std::cout << "  自动对齐: 已禁用（完全依赖CSV数据）\n";
+            std::cout << "  警告: 无CSV数据时将不进行对齐！\n\n";
+        } else {
+            std::cout << "  自动对齐: 已禁用\n";
+            std::cout << "  警告: 无对齐数据，检测可能不准确！\n\n";
+        }
     }
 }
 
@@ -1003,41 +1020,51 @@ void processImages(DefectDetector& detector, Visualizer& visualizer,
         std::string filename = fs::path(testFile).filename().string();
         
         try {
-            // 获取当前图片的定位数据
-            auto testLocation = getLocationData(locationDict, filename, config.verbose);
+            float offsetX = 0, offsetY = 0, rotationDiff = 0;
             
-            // 计算与模板的差值
-            float offsetX = testLocation.isValid ? testLocation.x - templateLocation.x : 0;
-            float offsetY = testLocation.isValid ? testLocation.y - templateLocation.y : 0;
-            float rotationDiff = testLocation.isValid ? testLocation.rotation - templateLocation.rotation : 0;
-            
-            if (testLocation.isValid) {
-                validLocationCount++;
+            if (config.useCsvAlignment) {
+                // 获取当前图片的定位数据
+                auto testLocation = getLocationData(locationDict, filename, config.verbose);
                 
-                float offset = std::sqrt(offsetX * offsetX + offsetY * offsetY);
-                maxOffset = (std::max)(maxOffset, offset);
-                minOffset = (std::min)(minOffset, offset);
-                totalOffset += offset;
+                // 计算与模板的差值
+                offsetX = testLocation.isValid ? testLocation.x - templateLocation.x : 0;
+                offsetY = testLocation.isValid ? testLocation.y - templateLocation.y : 0;
+                rotationDiff = testLocation.isValid ? testLocation.rotation - templateLocation.rotation : 0;
                 
-                float absRotation = std::abs(rotationDiff);
-                maxRotationDiff = (std::max)(maxRotationDiff, absRotation);
-                minRotationDiff = (std::min)(minRotationDiff, absRotation);
-                totalRotationDiff += absRotation;
-            }
-            
-            // 设置外部变换（使用CSV数据进行对齐）
-            if (testLocation.isValid) {
-                detector.setExternalTransform(offsetX, offsetY, rotationDiff);
-                if (config.verbose) {
-                    std::cout << "  使用CSV数据对齐: 偏移(" << std::fixed << std::setprecision(2) 
-                              << offsetX << ", " << offsetY << ")px, 旋转" << std::setprecision(3) 
-                              << rotationDiff << "°\n";
+                if (testLocation.isValid) {
+                    validLocationCount++;
+                    
+                    float offset = std::sqrt(offsetX * offsetX + offsetY * offsetY);
+                    maxOffset = (std::max)(maxOffset, offset);
+                    minOffset = (std::min)(minOffset, offset);
+                    totalOffset += offset;
+                    
+                    float absRotation = std::abs(rotationDiff);
+                    maxRotationDiff = (std::max)(maxRotationDiff, absRotation);
+                    minRotationDiff = (std::min)(minRotationDiff, absRotation);
+                    totalRotationDiff += absRotation;
+                }
+                
+                // 设置外部变换（使用CSV数据进行对齐）
+                if (testLocation.isValid) {
+                    detector.setExternalTransform(offsetX, offsetY, rotationDiff);
+                    if (config.verbose) {
+                        std::cout << "  使用CSV数据对齐: 偏移(" << std::fixed << std::setprecision(2) 
+                                  << offsetX << ", " << offsetY << ")px, 旋转" << std::setprecision(3) 
+                                  << rotationDiff << "°\n";
+                    }
+                } else {
+                    // 无CSV数据时清除外部变换，使用自动对齐
+                    detector.clearExternalTransform();
+                    if (config.verbose) {
+                        std::cout << "  无CSV定位数据，使用自动对齐\n";
+                    }
                 }
             } else {
-                // 无CSV数据时清除外部变换，使用自动对齐
+                // CSV对齐已禁用，使用自动对齐
                 detector.clearExternalTransform();
                 if (config.verbose) {
-                    std::cout << "  无CSV定位数据，使用自动对齐\n";
+                    std::cout << "  使用自动对齐（CSV已禁用）\n";
                 }
             }
             
@@ -1113,7 +1140,8 @@ void processImages(DefectDetector& detector, Visualizer& visualizer,
                 
                 // 对齐叠加可视化
                 if (config.showAlignmentOverlay) {
-                    if (testLocation.isValid) {
+                    // 使用计算得到的偏移量进行可视化（CSV或自动对齐都会提供）
+                    if (config.useCsvAlignment || config.autoAlignEnabled) {
                         const cv::Mat& templ = detector.getTemplate();
                         if (templ.empty()) {
                             std::cout << "    [警告] 模板图像为空，无法显示对齐叠加\n";
@@ -1199,8 +1227,6 @@ void processImages(DefectDetector& detector, Visualizer& visualizer,
                         } else {
                             std::cout << "    [警告] 模板或测试图像为空，无法显示对齐叠加\n";
                         }
-                    } else {
-                        std::cout << "    [对齐可视化] 跳过：无有效定位数据\n";
                     }
                 }
                 
@@ -1256,13 +1282,19 @@ void runDemo(const ProgramConfig& config) {
         throw std::runtime_error("数据目录不存在: " + config.dataDir);
     }
     
-    // 读取CSV定位数据
-    auto locationDict = loadLocationData(config.dataDir);
-    
-    // 获取模板的定位数据
+    // 读取CSV定位数据（如果启用CSV对齐）
+    std::map<std::string, LocationData> locationDict;
+    LocationData templateLocation;
     std::string templateFilename = fs::path(config.templateFile).filename().string();
-    auto templateLocation = getLocationData(locationDict, templateFilename, config.verbose);
-    std::cout << "模板定位点: " << templateLocation.toString() << "\n\n";
+    
+    if (config.useCsvAlignment) {
+        locationDict = loadLocationData(config.dataDir);
+        templateLocation = getLocationData(locationDict, templateFilename, config.verbose);
+        std::cout << "模板定位点: " << templateLocation.toString() << "\n\n";
+    } else {
+        std::cout << "CSV对齐: 已禁用，使用自动对齐模式\n";
+        std::cout << "模板定位点: 使用默认值 (0, 0, 0)\n\n";
+    }
     
     // 获取图像文件列表
     auto imageFiles = getImageFiles(config, templateFilename);
