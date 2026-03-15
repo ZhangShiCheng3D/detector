@@ -414,12 +414,27 @@ float TemplateMatcher::computeTolerantBinarySimilarity(const cv::Mat& template_i
     cv::Mat filter_kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
     cv::morphologyEx(significant_diff, significant_diff, cv::MORPH_OPEN, filter_kernel);
 
-    // 计算有效差异
-    int significant_mismatch = cv::countNonZero(significant_diff);
+    // 计算有效差异（使用min_significant_area过滤小的差异区域）
+    int significant_mismatch = 0;
     int total_pixels = diff.rows * diff.cols;
-
+    
     if (total_pixels == 0) {
         return 0.0f;
+    }
+    
+    // [FIX] 使用 min_significant_area 过滤小的差异区域
+    if (binary_params_.min_significant_area > 1) {
+        cv::Mat labels, stats, centroids;
+        int num_labels = cv::connectedComponentsWithStats(significant_diff, labels, stats, centroids);
+        
+        for (int i = 1; i < num_labels; ++i) {
+            int area = stats.at<int>(i, cv::CC_STAT_AREA);
+            if (area >= binary_params_.min_significant_area) {
+                significant_mismatch += area;
+            }
+        }
+    } else {
+        significant_mismatch = cv::countNonZero(significant_diff);
     }
 
     return 1.0f - (static_cast<float>(significant_mismatch) / total_pixels);

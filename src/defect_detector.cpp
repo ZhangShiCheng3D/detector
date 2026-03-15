@@ -375,6 +375,26 @@ bool DefectDetector::setParameter(const std::string& name, float value) {
     }
 
     defect_analyzer_.setParams(global_params_);
+    
+    // [FIX] 同步更新所有已创建ROI的参数，确保setParameter对已存在的ROI也生效
+    for (auto& roi : roi_manager_.getAllROIs()) {
+        if (name == "blur_kernel_size") {
+            roi.params.blur_kernel_size = global_params_.blur_kernel_size;
+        } else if (name == "binary_threshold") {
+            roi.params.binary_threshold = global_params_.binary_threshold;
+        } else if (name == "min_defect_size") {
+            roi.params.min_defect_size = global_params_.min_defect_size;
+        } else if (name == "similarity_threshold") {
+            roi.params.similarity_threshold = global_params_.similarity_threshold;
+        } else if (name == "morphology_kernel_size") {
+            roi.params.morphology_kernel_size = global_params_.morphology_kernel_size;
+        } else if (name == "detect_black_on_white") {
+            roi.params.detect_black_on_white = global_params_.detect_black_on_white;
+        } else if (name == "detect_white_on_black") {
+            roi.params.detect_white_on_black = global_params_.detect_white_on_black;
+        }
+    }
+    
     return true;
 }
 
