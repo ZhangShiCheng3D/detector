@@ -1291,6 +1291,33 @@ int IsTemplateLoaded(void* detector) {
     }
 }
 
+int ExtractROITemplates(void* detector) {
+    API_LOG_CALL("ExtractROITemplates", fmtParams("detector", detector));
+    
+    if (!detector) {
+        API_LOG_RESULT("ExtractROITemplates", "failed: null detector");
+        return -1;
+    }
+
+    try {
+        DefectDetector* det = static_cast<DefectDetector*>(detector);
+        if (det->getTemplate().empty()) {
+            API_LOG_RESULT("ExtractROITemplates", "failed: template not loaded");
+            return -1;
+        }
+        
+        det->getROIManager().extractTemplates(det->getTemplate());
+        API_LOG_RESULT("ExtractROITemplates", "success");
+        return 0;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("ExtractROITemplates", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("ExtractROITemplates", "unknown exception");
+        return -1;
+    }
+}
+
 // ==================== 完整检测结果接口实现 ====================
 
 int DetectWithFullResult(void* detector, unsigned char* test_image,

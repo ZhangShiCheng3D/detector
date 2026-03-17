@@ -482,6 +482,14 @@ EXPORT_API int GetTemplateSize(void* detector, int* width, int* height, int* cha
  */
 EXPORT_API int IsTemplateLoaded(void* detector);
 
+/**
+ * @brief 提取ROI模板图像
+ * @param detector 检测器句柄
+ * @return 0成功，非0失败
+ * @note 在添加ROI后调用此函数，从已加载的模板中提取各ROI区域的模板图像
+ */
+EXPORT_API int ExtractROITemplates(void* detector);
+
 // ==================== 完整检测结果接口 ====================
 
 /**
