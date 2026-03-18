@@ -786,7 +786,7 @@ namespace DetectionUITest
 
             nudMinArea.Minimum = 1;
             nudMinArea.Maximum = 500;
-            nudMinArea.Value = 100;
+            nudMinArea.Value = 20;
             nudMinArea.Increment = 1;
 
             nudSimThresh.Minimum = 0;
@@ -1742,7 +1742,7 @@ namespace DetectionUITest
                 };
                 detector.SetBinaryDetectionParams(binaryParams);
 
-                detector.SetParameter("min_defect_size", 50);
+                detector.SetParameter("min_defect_size", 100);
                 detector.SetParameter("blur_kernel_size", 3);
                 detector.SetParameter("detect_black_on_white", 1);
                 detector.SetParameter("detect_white_on_black", 1);
@@ -1859,8 +1859,8 @@ namespace DetectionUITest
 
             var allDefects = detailedResult?.Defects ?? new DefectDetectorAPI.DefectInfo[0];
 
-            // 与demo_cpp一致的瑕疵尺寸阈值
-            const int DEFECT_SIZE_THRESHOLD = 50;
+            // 与demo_cpp一致的瑕疵尺寸阈值 (demo_cpp中定义为100)
+            const int DEFECT_SIZE_THRESHOLD = 100;
 
             var convertedDefects = new List<UIDefectInfo>();
 
