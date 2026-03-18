@@ -71,6 +71,9 @@ namespace DetectionUITest
             detector.EnableAPILog(true);
             detector.ClearAPILog();
 
+            // 初始化检测器参数（确保与demo_cpp一致）
+            InitializeDetectorParams();
+
             // 初始化Socket客户端
             InitializeSocketClient();
 
@@ -85,6 +88,32 @@ namespace DetectionUITest
         {
             // 窗体显示后开始自动连接
             StartAutoConnect();
+        }
+
+        private void InitializeDetectorParams()
+        {
+            // 在detector创建后立即初始化所有参数，确保与demo_cpp行为一致
+            // 注意：这些设置必须与InitializeCustomComponents中的默认值保持一致
+            
+            // 启用自动对齐（与demo_cpp默认一致）
+            detector.EnableAutoLocalization(chkAutoAlign.Checked);
+            
+            // 设置对齐模式（与demo_cpp默认一致：ROI_ONLY）
+            switch (cmbAlignMode.SelectedIndex)
+            {
+                case 0:
+                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.None);
+                    break;
+                case 1:
+                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.FullImage);
+                    break;
+                case 2:
+                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.RoiOnly);
+                    break;
+            }
+            
+            // 更新其他检测参数
+            UpdateBinaryParams();
         }
 
         private void InitializeSocketClient()
@@ -398,8 +427,8 @@ namespace DetectionUITest
                     defects = detailedResult.Defects;
                 });
 
-                // 与demo_cpp一致的结果判定：只根据瑕疵面积判断
-                int significantDefectCount = defects?.Count(d => d.Area >= 50) ?? 0;
+                // 与demo_cpp一致的结果判定：只根据瑕疵面积判断 (DEFECT_SIZE_THRESHOLD = 100)
+                int significantDefectCount = defects?.Count(d => d.Area >= 100) ?? 0;
                 bool passed = significantDefectCount == 0;
                 int defectCount = significantDefectCount;
 
@@ -769,29 +798,30 @@ namespace DetectionUITest
             });
             cmbAlignMode.SelectedIndex = 2;
 
+            // 与demo_cpp对齐的默认参数值
             nudBinaryThreshold.Minimum = 0;
             nudBinaryThreshold.Maximum = 255;
-            nudBinaryThreshold.Value = 128;
+            nudBinaryThreshold.Value = 30;  // C++默认: 30
             nudBinaryThreshold.Increment = 1;
 
             nudEdgeTol.Minimum = 0;
             nudEdgeTol.Maximum = 20;
-            nudEdgeTol.Value = 10;
+            nudEdgeTol.Value = 2;  // C++默认: 2
             nudEdgeTol.Increment = 1;
 
             nudNoiseSize.Minimum = 0;
             nudNoiseSize.Maximum = 50;
-            nudNoiseSize.Value = 3;
+            nudNoiseSize.Value = 3;  // C++默认: 3
             nudNoiseSize.Increment = 1;
 
             nudMinArea.Minimum = 1;
             nudMinArea.Maximum = 500;
-            nudMinArea.Value = 20;
+            nudMinArea.Value = 20;  // C++默认: 20
             nudMinArea.Increment = 1;
 
             nudSimThresh.Minimum = 0;
             nudSimThresh.Maximum = 100;
-            nudSimThresh.Value = 85;
+            nudSimThresh.Value = 90;  // C++默认: 90 (0.90 * 100)
             nudSimThresh.DecimalPlaces = 1;
 
             chkBinaryOpt.Checked = true;
@@ -1735,7 +1765,7 @@ namespace DetectionUITest
                     EdgeTolerancePixels = (int)nudEdgeTol.Value,
                     EdgeDiffIgnoreRatio = 0.05f,
                     MinSignificantArea = (int)nudMinArea.Value,
-                    AreaDiffThreshold = 0.01f,
+                    AreaDiffThreshold = 0.001f,  // C++默认值: 0.001f
                     OverallSimilarityThreshold = (float)nudSimThresh.Value / 100f,
                     EdgeDefectSizeThreshold = 500,
                     EdgeDistanceMultiplier = 2
