@@ -12,10 +12,18 @@ namespace DetectionUITest
 {
     /// <summary>
     /// 喷印瑕疵检测系统 C# 封装
-    /// 版本: 3.5 (更新至最新API头文件)
+    /// 版本: 3.6 (与demo_dll.cpp保持一致)
     /// </summary>
     public class DefectDetectorAPI : IDisposable
     {
+        // ==================== 常量定义（与demo_dll.cpp一致） ====================
+        public const int DEFAULT_BINARY_THRESHOLD = 30;
+        public const int DEFAULT_DEFECT_SIZE_THRESHOLD = 100;
+        public const int DEFAULT_ALIGN_DIFF_THRESHOLD = 128;
+        public const int DEFAULT_MIN_SIGNIFICANT_AREA = 20;
+        public const float DEFAULT_OVERALL_SIMILARITY_THRESHOLD = 0.90f;
+        public const int DEFAULT_EDGE_DEFECT_SIZE_THRESHOLD = 500;
+        public const float DEFAULT_EDGE_DISTANCE_MULTIPLIER = 2.0f;
         #region DLL导入声明
 
         private const string DllName = "defect_detection.dll";
@@ -38,6 +46,9 @@ namespace DetectionUITest
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int AddROI(IntPtr detector, int x, int y, int width, int height, float threshold);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int AddROIWithParams(IntPtr detector, int x, int y, int width, int height, float threshold, ref DetectionParamsC params_);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int RemoveROI(IntPtr detector, int roi_id);
@@ -465,6 +476,21 @@ namespace DetectionUITest
 
         #region P/Invoke原生结构体
 
+        /// <summary>
+        /// ROI检测参数结构（C接口）- 与demo_dll.cpp一致
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct DetectionParamsC
+        {
+            public int blur_kernel_size;       // 高斯模糊核大小
+            public int binary_threshold;       // 二值化阈值
+            public int min_defect_size;        // 最小瑕疵尺寸
+            public int detect_black_on_white;  // 检测白底黑点 (0=禁用, 1=启用)
+            public int detect_white_on_black;  // 检测黑底白点 (0=禁用, 1=启用)
+            public float similarity_threshold; // 相似度阈值
+            public int morphology_kernel_size; // 形态学核大小
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         internal struct BinaryDetectionParamsC
         {
@@ -720,6 +746,9 @@ namespace DetectionUITest
 
         #region ROI管理
 
+        /// <summary>
+        /// 添加ROI区域
+        /// </summary>
         public int AddROI(int x, int y, int width, int height, float threshold = 0.85f)
         {
             CheckDisposed();
@@ -737,9 +766,93 @@ namespace DetectionUITest
             return roiId;
         }
 
+        /// <summary>
+        /// 添加ROI区域（带详细参数）- 与demo_dll.cpp的ROIManager::addROI行为一致
+        /// </summary>
+        /// <param name="x">左上角X坐标</param>
+        /// <param name="y">左上角Y坐标</param>
+        /// <param name="width">宽度</param>
+        /// <param name="height">高度</param>
+        /// <param name="threshold">相似度阈值</param>
+        /// <param name="params">ROI检测参数</param>
+        /// <returns>ROI的ID</returns>
+        public int AddROIWithParams(int x, int y, int width, int height, float threshold, DetectionParams parameters)
+        {
+            CheckDisposed();
+
+            if (threshold < 0 || threshold > 1.0f)
+                throw new ArgumentException("阈值必须在0.0到1.0之间", nameof(threshold));
+            if (width <= 0 || height <= 0)
+                throw new ArgumentException("ROI宽度和高度必须大于0", nameof(width));
+            if (x < 0 || y < 0)
+                throw new ArgumentException("ROI坐标不能为负数", nameof(x));
+            if (parameters == null)
+                throw new ArgumentNullException(nameof(parameters));
+
+            var paramsC = new DetectionParamsC
+            {
+                blur_kernel_size = parameters.BlurKernelSize,
+                binary_threshold = parameters.BinaryThreshold,
+                min_defect_size = parameters.MinDefectSize,
+                detect_black_on_white = parameters.DetectBlackOnWhite ? 1 : 0,
+                detect_white_on_black = parameters.DetectWhiteOnBlack ? 1 : 0,
+                similarity_threshold = parameters.SimilarityThreshold,
+                morphology_kernel_size = parameters.MorphologyKernelSize
+            };
+
+            int roiId = AddROIWithParams(_detectorHandle, x, y, width, height, threshold, ref paramsC);
+            if (roiId < 0)
+                throw new InvalidOperationException($"添加ROI失败，错误码:{roiId}");
+            return roiId;
+        }
+
+        /// <summary>
+        /// 添加ROI区域（使用默认参数）- 与demo_dll.cpp行为一致
+        /// </summary>
+        /// <param name="x">左上角X坐标</param>
+        /// <param name="y">左上角Y坐标</param>
+        /// <param name="width">宽度</param>
+        /// <param name="height">高度</param>
+        /// <param name="threshold">相似度阈值</param>
+        /// <param name="binaryThreshold">二值化阈值（默认30）</param>
+        /// <param name="blurKernelSize">高斯模糊核大小（默认3）</param>
+        /// <param name="minDefectSize">最小瑕疵尺寸（默认100）</param>
+        /// <returns>ROI的ID</returns>
+        public int AddROIWithDefaultParams(int x, int y, int width, int height, float threshold,
+            int binaryThreshold = DEFAULT_BINARY_THRESHOLD,
+            int blurKernelSize = 3,
+            int minDefectSize = DEFAULT_DEFECT_SIZE_THRESHOLD)
+        {
+            var defaultParams = new DetectionParams
+            {
+                BinaryThreshold = binaryThreshold,
+                BlurKernelSize = blurKernelSize,
+                MinDefectSize = minDefectSize,
+                DetectBlackOnWhite = true,
+                DetectWhiteOnBlack = true,
+                SimilarityThreshold = threshold,
+                MorphologyKernelSize = 3
+            };
+            return AddROIWithParams(x, y, width, height, threshold, defaultParams);
+        }
+
         public int AddROI(Rectangle rect, float threshold = 0.85f)
         {
             return AddROI(rect.X, rect.Y, rect.Width, rect.Height, threshold);
+        }
+
+        /// <summary>
+        /// ROI检测参数类 - 与demo_dll.cpp的DetectionParamsC对应
+        /// </summary>
+        public class DetectionParams
+        {
+            public int BlurKernelSize { get; set; } = 3;           // 高斯模糊核大小
+            public int BinaryThreshold { get; set; } = 30;          // 二值化阈值
+            public int MinDefectSize { get; set; } = 100;           // 最小瑕疵尺寸
+            public bool DetectBlackOnWhite { get; set; } = true;    // 检测白底黑点
+            public bool DetectWhiteOnBlack { get; set; } = true;    // 检测黑底白点
+            public float SimilarityThreshold { get; set; } = 0.85f; // 相似度阈值
+            public int MorphologyKernelSize { get; set; } = 3;      // 形态学核大小
         }
 
         public bool RemoveROI(int roiId)
@@ -1689,12 +1802,44 @@ namespace DetectionUITest
         }
 
         /// <summary>
-        /// 详细检测结果（含瑕疵信息）
+        /// 详细检测结果（含瑕疵信息）- 与demo_dll.cpp检测逻辑一致
         /// </summary>
         public class DetectionResultDetailed : DetectionResultBasic
         {
             public DefectInfo[] Defects { get; set; }
             public int ActualDefectCount { get; set; }
+
+            /// <summary>
+            /// 重大瑕疵判定阈值（与demo_dll.cpp的DEFECT_SIZE_THRESHOLD一致）
+            /// </summary>
+            public int SignificantDefectThreshold { get; set; } = DEFAULT_DEFECT_SIZE_THRESHOLD;
+
+            /// <summary>
+            /// 是否有重大瑕疵（面积 >= SignificantDefectThreshold）
+            /// 与demo_dll.cpp的判定逻辑一致：只看瑕疵面积，不看similarity
+            /// </summary>
+            public bool HasSignificantDefects
+            {
+                get
+                {
+                    if (Defects == null) return false;
+                    return Defects.Any(d => d.Area >= SignificantDefectThreshold);
+                }
+            }
+
+            /// <summary>
+            /// 获取重大瑕疵列表（与demo_dll.cpp一致）
+            /// </summary>
+            public DefectInfo[] GetSignificantDefects()
+            {
+                if (Defects == null) return Array.Empty<DefectInfo>();
+                return Defects.Where(d => d.Area >= SignificantDefectThreshold).ToArray();
+            }
+
+            /// <summary>
+            /// 最终判定结果（与demo_dll.cpp一致）
+            /// </summary>
+            public bool FinalPassed => !HasSignificantDefects;
 
             public DefectInfo[] GetDefectsByROI(int roiId)
             {
@@ -1717,7 +1862,9 @@ namespace DetectionUITest
                     case 0:
                         return string.Format("检测通过, 无瑕疵, 总耗时:{0:F1}ms", ProcessingTime);
                     case 1:
-                        return string.Format("检测未通过, 发现{0}个瑕疵, 总耗时:{1:F1}ms", ActualDefectCount, ProcessingTime);
+                        var sigDefects = GetSignificantDefects();
+                        return string.Format("检测未通过, 发现{0}个瑕疵({1}个重大), 总耗时:{2:F1}ms",
+                            ActualDefectCount, sigDefects.Length, ProcessingTime);
                     default:
                         return string.Format("未知状态({0})", ResultCode);
                 }
@@ -1741,4 +1888,506 @@ namespace DetectionUITest
 
         #endregion
     }
+
+    #region 高级辅助类（与demo_dll.cpp使用方式一致）
+
+    /// <summary>
+    /// ROI参数 - 与demo_dll.cpp的ROIParams对应
+    /// </summary>
+    public class ROIParams
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public float Threshold { get; set; }
+
+        public ROIParams() { }
+
+        public ROIParams(int x, int y, int width, int height, float threshold)
+        {
+            X = x;
+            Y = y;
+            Width = width;
+            Height = height;
+            Threshold = threshold;
+        }
+
+        public Rectangle ToRectangle()
+        {
+            return new Rectangle(X, Y, Width, Height);
+        }
+
+        public override string ToString()
+        {
+            return $"({X},{Y}) {Width}x{Height} threshold={Threshold:F2}";
+        }
+    }
+
+    /// <summary>
+    /// 检测配置 - 与demo_dll.cpp的ProgramConfig对应
+    /// </summary>
+    public class DetectionConfig
+    {
+        // 基本配置
+        public string TemplateFile { get; set; }
+        public ROIParams ROI { get; set; } = new ROIParams();
+        public string DataDir { get; set; }
+        public string OutputDir { get; set; } = "output";
+
+        // 对齐配置
+        public bool AutoAlignEnabled { get; set; } = true;
+        public DefectDetectorAPI.AlignmentMode AlignMode { get; set; } = DefectDetectorAPI.AlignmentMode.RoiOnly;
+        public bool UseCsvAlignment { get; set; } = true;
+
+        // ROI内缩配置
+        public int ROIShrinkPixels { get; set; } = 5;
+
+        // 二值图像优化配置（与demo_dll.cpp一致）
+        public bool BinaryOptimizationEnabled { get; set; } = true;
+        public int BinaryThreshold { get; set; } = DefectDetectorAPI.DEFAULT_BINARY_THRESHOLD;
+        public int NoiseFilterSize { get; set; } = 3;
+        public int EdgeTolerancePixels { get; set; } = 2;
+        public bool EdgeFilterEnabled { get; set; } = true;
+        public float EdgeDiffIgnoreRatio { get; set; } = 0.05f;
+        public int MinSignificantArea { get; set; } = DefectDetectorAPI.DEFAULT_MIN_SIGNIFICANT_AREA;
+        public float AreaDiffThreshold { get; set; } = 0.001f;
+        public float OverallSimilarityThreshold { get; set; } = DefectDetectorAPI.DEFAULT_OVERALL_SIMILARITY_THRESHOLD;
+        public int EdgeDefectSizeThreshold { get; set; } = DefectDetectorAPI.DEFAULT_EDGE_DEFECT_SIZE_THRESHOLD;
+        public float EdgeDistanceMultiplier { get; set; } = DefectDetectorAPI.DEFAULT_EDGE_DISTANCE_MULTIPLIER;
+
+        // 通用检测参数
+        public int MinDefectSize { get; set; } = DefectDetectorAPI.DEFAULT_DEFECT_SIZE_THRESHOLD;
+        public int BlurKernelSize { get; set; } = 3;
+        public bool DetectBlackOnWhite { get; set; } = true;
+        public bool DetectWhiteOnBlack { get; set; } = true;
+
+        // 瑕疵判定阈值
+        public int DefectSizeThreshold { get; set; } = DefectDetectorAPI.DEFAULT_DEFECT_SIZE_THRESHOLD;
+
+        public override string ToString()
+        {
+            return $"Template={TemplateFile}, ROI={ROI}, BinaryOpt={BinaryOptimizationEnabled}, BinaryThreshold={BinaryThreshold}";
+        }
+    }
+
+    /// <summary>
+    /// 定位数据结构 - 与demo_dll.cpp的LocationData对应
+    /// </summary>
+    public class LocationData
+    {
+        public string Filename { get; set; }
+        public float X { get; set; }
+        public float Y { get; set; }
+        public float Rotation { get; set; }
+        public bool IsValid { get; set; }
+
+        public override string ToString()
+        {
+            if (!IsValid) return "无效数据";
+            return $"({X:F2}, {Y:F2}) 旋转={Rotation:F3}°";
+        }
+    }
+
+    /// <summary>
+    /// 单张图像检测结果 - 与demo_dll.cpp的处理结果对应
+    /// </summary>
+    public class ImageDetectionResult
+    {
+        public string Filename { get; set; }
+        public bool Passed { get; set; }
+        public int PassedROIs { get; set; }
+        public int TotalROIs { get; set; }
+        public float MinSimilarity { get; set; }
+        public double ProcessingTime { get; set; }
+        public float OffsetX { get; set; }
+        public float OffsetY { get; set; }
+        public float RotationDiff { get; set; }
+        public DefectDetectorAPI.DefectInfo[] Defects { get; set; }
+        public DefectDetectorAPI.DefectInfo[] SignificantDefects { get; set; }
+        public string ErrorMessage { get; set; }
+        public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+    }
+
+    /// <summary>
+    /// 批次检测统计 - 与demo_dll.cpp的统计报告对应
+    /// </summary>
+    public class BatchStatistics
+    {
+        public int TotalImages { get; set; }
+        public int PassCount { get; set; }
+        public int FailCount { get; set; }
+        public double TotalTime { get; set; }
+        public double AverageTime => TotalImages > 0 ? TotalTime / TotalImages : 0;
+        public double PassRate => TotalImages > 0 ? 100.0 * PassCount / TotalImages : 0;
+
+        // 定位数据统计
+        public int ValidLocationCount { get; set; }
+        public float MinOffset { get; set; }
+        public float MaxOffset { get; set; }
+        public float AverageOffset { get; set; }
+        public float MinRotationDiff { get; set; }
+        public float MaxRotationDiff { get; set; }
+        public float AverageRotationDiff { get; set; }
+
+        public override string ToString()
+        {
+            return $"总计:{TotalImages}, 通过:{PassCount}, 失败:{FailCount}, 通过率:{PassRate:F1}%, 平均耗时:{AverageTime:F2}ms";
+        }
+    }
+
+    /// <summary>
+    /// 瑕疵检测辅助类 - 提供与demo_dll.cpp一致的高级API
+    /// </summary>
+    public class DefectDetectionHelper : IDisposable
+    {
+        private readonly DefectDetectorAPI _api;
+        private bool _isDisposed;
+
+        public DefectDetectorAPI API => _api;
+
+        public DefectDetectionHelper()
+        {
+            _api = new DefectDetectorAPI();
+        }
+
+        /// <summary>
+        /// 初始化检测器（与demo_dll.cpp的configureDetector + setupSingleROI + configureAlignment一致）
+        /// </summary>
+        public void Initialize(DetectionConfig config)
+        {
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+            if (string.IsNullOrEmpty(config.TemplateFile))
+                throw new ArgumentException("模板文件路径不能为空", nameof(config));
+            if (!File.Exists(config.TemplateFile))
+                throw new FileNotFoundException("模板文件不存在", config.TemplateFile);
+
+            // Step 1: 导入模板
+            if (!_api.ImportTemplateFromFile(config.TemplateFile))
+                throw new InvalidOperationException("无法导入模板: " + config.TemplateFile);
+
+            // 提取ROI模板（关键步骤！）
+            _api.ExtractROITemplates();
+
+            // Step 2: 配置检测参数（与demo_dll.cpp的configureDetector一致）
+            ConfigureDetector(config);
+
+            // Step 3: 设置ROI区域（与demo_dll.cpp的setupSingleROI一致）
+            SetupSingleROI(config);
+
+            // Step 4: 配置对齐（与demo_dll.cpp的configureAlignment一致）
+            ConfigureAlignment(config);
+        }
+
+        /// <summary>
+        /// 配置检测参数 - 与demo_dll.cpp的configureDetector函数一致
+        /// </summary>
+        private void ConfigureDetector(DetectionConfig config)
+        {
+            // 设置匹配方法为二值模式
+            _api.SetMatchMethod(DefectDetectorAPI.MatchMethod.Binary);
+            _api.SetBinaryThreshold(config.BinaryThreshold);
+
+            // 配置二值检测参数（与demo_dll.cpp完全一致）
+            var binaryParams = DefectDetectorAPI.GetDefaultBinaryDetectionParams();
+            binaryParams.Enabled = config.BinaryOptimizationEnabled ? 1 : 0;
+            binaryParams.AutoDetectBinary = 1;  // demo_cpp中显式设置为true
+            binaryParams.NoiseFilterSize = config.NoiseFilterSize;
+            binaryParams.EdgeTolerancePixels = config.EdgeFilterEnabled ? config.EdgeTolerancePixels : 0;
+            binaryParams.EdgeDiffIgnoreRatio = config.EdgeDiffIgnoreRatio;
+            binaryParams.MinSignificantArea = config.MinSignificantArea;
+            binaryParams.AreaDiffThreshold = config.AreaDiffThreshold;
+            binaryParams.OverallSimilarityThreshold = config.OverallSimilarityThreshold;
+            binaryParams.EdgeDefectSizeThreshold = config.EdgeDefectSizeThreshold;
+            binaryParams.EdgeDistanceMultiplier = config.EdgeDistanceMultiplier;
+            binaryParams.BinaryThreshold = config.BinaryThreshold;
+
+            _api.SetBinaryDetectionParams(binaryParams);
+
+            // 设置其他参数
+            _api.SetParameter("min_defect_size", config.MinDefectSize);
+            _api.SetParameter("blur_kernel_size", config.BlurKernelSize);
+            _api.SetParameter("detect_black_on_white", config.DetectBlackOnWhite ? 1.0f : 0.0f);
+            _api.SetParameter("detect_white_on_black", config.DetectWhiteOnBlack ? 1.0f : 0.0f);
+        }
+
+        /// <summary>
+        /// 设置单个ROI - 与demo_dll.cpp的setupSingleROI函数一致
+        /// </summary>
+        private void SetupSingleROI(DetectionConfig config)
+        {
+            // ROI内缩（与demo_dll.cpp完全一致）
+            int shrinkPixels = config.ROIShrinkPixels;
+            int x = config.ROI.X + shrinkPixels;
+            int y = config.ROI.Y + shrinkPixels;
+            int width = config.ROI.Width - 2 * shrinkPixels;
+            int height = config.ROI.Height - 2 * shrinkPixels;
+
+            // 确保ROI尺寸有效
+            if (width <= 0 || height <= 0)
+            {
+                x = config.ROI.X;
+                y = config.ROI.Y;
+                width = config.ROI.Width;
+                height = config.ROI.Height;
+                shrinkPixels = 0;
+            }
+
+            // 创建DetectionParams并设置参数（与demo_dll.cpp完全一致）
+            var params_ = new DefectDetectorAPI.DetectionParams
+            {
+                BinaryThreshold = config.BinaryThreshold,
+                BlurKernelSize = config.BlurKernelSize,
+                MinDefectSize = config.MinDefectSize,
+                DetectBlackOnWhite = config.DetectBlackOnWhite,
+                DetectWhiteOnBlack = config.DetectWhiteOnBlack,
+                SimilarityThreshold = config.ROI.Threshold,
+                MorphologyKernelSize = 3
+            };
+
+            // 使用AddROIWithParams添加ROI
+            _api.AddROIWithParams(x, y, width, height, config.ROI.Threshold, params_);
+
+            // 提取ROI模板图像（关键！否则模板图像为空，无法检测）
+            _api.ExtractROITemplates();
+        }
+
+        /// <summary>
+        /// 配置对齐 - 与demo_dll.cpp的configureAlignment函数一致
+        /// </summary>
+        private void ConfigureAlignment(DetectionConfig config)
+        {
+            _api.EnableAutoLocalization(config.AutoAlignEnabled);
+            _api.SetAlignmentMode(config.AlignMode);
+        }
+
+        /// <summary>
+        /// 检测单张图像 - 与demo_dll.cpp的processImages中的处理逻辑一致
+        /// </summary>
+        public ImageDetectionResult DetectImage(string imagePath, LocationData locationData = null, DetectionConfig config = null)
+        {
+            if (string.IsNullOrEmpty(imagePath))
+                throw new ArgumentException("图像路径不能为空", nameof(imagePath));
+            if (!File.Exists(imagePath))
+                throw new FileNotFoundException("图像文件不存在", imagePath);
+
+            var result = new ImageDetectionResult { Filename = Path.GetFileName(imagePath) };
+
+            try
+            {
+                float offsetX = 0, offsetY = 0, rotationDiff = 0;
+
+                // 设置外部变换（如果提供了定位数据）
+                if (locationData != null && locationData.IsValid)
+                {
+                    offsetX = locationData.X;
+                    offsetY = locationData.Y;
+                    rotationDiff = locationData.Rotation;
+                    _api.SetExternalTransform(offsetX, offsetY, rotationDiff);
+                }
+                else
+                {
+                    _api.ClearExternalTransform();
+                }
+
+                // 执行检测（使用DetectDefectsFromFileEx获取完整信息和瑕疵详情）
+                var detectionResult = _api.DetectFromFileEx(imagePath);
+
+                // 瑕疵检测判定（与demo_dll.cpp完全一致：面积>=DefectSizeThreshold视为重大缺陷）
+                var significantDefectThreshold = config?.DefectSizeThreshold ?? DefectDetectorAPI.DEFAULT_DEFECT_SIZE_THRESHOLD;
+                var significantDefects = detectionResult.Defects?.Where(d => d.Area >= significantDefectThreshold).ToArray() ?? new DefectDetectorAPI.DefectInfo[0];
+                bool finalPass = significantDefects.Length == 0;
+
+                // 获取ROI结果
+                var roiResults = _api.GetLastROIResults();
+                int passedROIs = roiResults.Count(r => r.Passed == 1);
+                float minSimilarity = roiResults.Length > 0 ? roiResults.Min(r => r.Similarity) : 1.0f;
+
+                result.Passed = finalPass;
+                result.PassedROIs = passedROIs;
+                result.TotalROIs = roiResults.Length;
+                result.MinSimilarity = minSimilarity;
+                result.ProcessingTime = detectionResult.ProcessingTime;
+                result.OffsetX = offsetX;
+                result.OffsetY = offsetY;
+                result.RotationDiff = rotationDiff;
+                result.Defects = detectionResult.Defects;
+                result.SignificantDefects = significantDefects;
+
+                // 清除外部变换
+                _api.ClearExternalTransform();
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.Passed = false;
+                result.ErrorMessage = ex.Message;
+                _api.ClearExternalTransform();
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// 批量检测图像
+        /// </summary>
+        public List<ImageDetectionResult> DetectImages(List<string> imagePaths, Dictionary<string, LocationData> locationDict = null, DetectionConfig config = null)
+        {
+            var results = new List<ImageDetectionResult>();
+
+            foreach (var path in imagePaths)
+            {
+                string filename = Path.GetFileName(path);
+                LocationData locData = null;
+                locationDict?.TryGetValue(filename, out locData);
+
+                var result = DetectImage(path, locData, config);
+                results.Add(result);
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// 计算批次统计信息 - 与demo_dll.cpp的printSummaryReport一致
+        /// </summary>
+        public BatchStatistics CalculateStatistics(List<ImageDetectionResult> results)
+        {
+            if (results == null || results.Count == 0)
+                return new BatchStatistics();
+
+            var stats = new BatchStatistics
+            {
+                TotalImages = results.Count,
+                PassCount = results.Count(r => r.Passed && !r.HasError),
+                FailCount = results.Count(r => !r.Passed || r.HasError),
+                TotalTime = results.Sum(r => r.ProcessingTime),
+                ValidLocationCount = results.Count(r => Math.Abs(r.OffsetX) > 0.001f || Math.Abs(r.OffsetY) > 0.001f || Math.Abs(r.RotationDiff) > 0.001f)
+            };
+
+            // 计算偏移统计
+            var offsets = results
+                .Where(r => Math.Abs(r.OffsetX) > 0.001f || Math.Abs(r.OffsetY) > 0.001f)
+                .Select(r => (float)Math.Sqrt(r.OffsetX * r.OffsetX + r.OffsetY * r.OffsetY))
+                .ToList();
+
+            if (offsets.Count > 0)
+            {
+                stats.MinOffset = offsets.Min();
+                stats.MaxOffset = offsets.Max();
+                stats.AverageOffset = offsets.Average();
+            }
+
+            // 计算旋转差统计
+            var rotDiffs = results
+                .Where(r => Math.Abs(r.RotationDiff) > 0.001f)
+                .Select(r => Math.Abs(r.RotationDiff))
+                .ToList();
+
+            if (rotDiffs.Count > 0)
+            {
+                stats.MinRotationDiff = rotDiffs.Min();
+                stats.MaxRotationDiff = rotDiffs.Max();
+                stats.AverageRotationDiff = rotDiffs.Average();
+            }
+
+            return stats;
+        }
+
+        /// <summary>
+        /// 从CSV文件读取定位数据 - 与demo_dll.cpp的loadLocationData对应
+        /// </summary>
+        public static Dictionary<string, LocationData> LoadLocationDataFromCsv(string dataDir, string csvFilename = "匹配信息_116_20260304161622333.csv")
+        {
+            var dict = new Dictionary<string, LocationData>(StringComparer.OrdinalIgnoreCase);
+            string csvPath = Path.Combine(dataDir, csvFilename);
+
+            if (!File.Exists(csvPath))
+            {
+                Console.WriteLine($"[警告] CSV文件不存在: {csvPath}");
+                return dict;
+            }
+
+            try
+            {
+                var lines = File.ReadAllLines(csvPath, Encoding.UTF8);
+                if (lines.Length < 2) return dict;
+
+                // 跳过标题行
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    var line = lines[i].Trim();
+                    if (string.IsNullOrEmpty(line)) continue;
+
+                    var parts = line.Split(',');
+                    if (parts.Length >= 4)
+                    {
+                        var data = new LocationData
+                        {
+                            Filename = parts[0].Trim(),
+                            IsValid = !string.IsNullOrWhiteSpace(parts[1]) &&
+                                     !string.IsNullOrWhiteSpace(parts[2]) &&
+                                     !string.IsNullOrWhiteSpace(parts[3])
+                        };
+
+                        if (data.IsValid)
+                        {
+                            if (float.TryParse(parts[1].Trim(), out float x))
+                                data.X = x;
+                            if (float.TryParse(parts[2].Trim(), out float y))
+                                data.Y = y;
+                            if (float.TryParse(parts[3].Trim(), out float r))
+                                data.Rotation = r;
+                        }
+
+                        dict[data.Filename] = data;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[警告] 读取CSV文件失败: {ex.Message}");
+            }
+
+            return dict;
+        }
+
+        /// <summary>
+        /// 获取支持的图像文件列表
+        /// </summary>
+        public static List<string> GetImageFiles(string dataDir, string excludeFilename = null)
+        {
+            var extensions = new[] { ".bmp", ".jpg", ".jpeg", ".png" };
+            var files = new List<string>();
+
+            if (!Directory.Exists(dataDir))
+                return files;
+
+            foreach (var ext in extensions)
+            {
+                files.AddRange(Directory.GetFiles(dataDir, "*" + ext, SearchOption.TopDirectoryOnly));
+            }
+
+            // 排除模板文件
+            if (!string.IsNullOrEmpty(excludeFilename))
+            {
+                string excludeLower = excludeFilename.ToLowerInvariant();
+                files = files.Where(f => !Path.GetFileName(f).Equals(excludeLower, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+
+            return files.OrderBy(f => f).ToList();
+        }
+
+        public void Dispose()
+        {
+            if (!_isDisposed)
+            {
+                _api?.Dispose();
+                _isDisposed = true;
+            }
+        }
+    }
+
+    #endregion
 }

@@ -7,6 +7,7 @@
 #include "c_api.h"
 #include "defect_detector.h"
 #include "template_learner.h"
+#include "visualizer.h"
 #include "api_logger.h"
 #include <opencv2/opencv.hpp>
 #include <cstring>
@@ -240,6 +241,50 @@ int AddROI(void* detector, int x, int y, int width, int height, float threshold)
         return -1;
     } catch (...) {
         API_LOG_RESULT("AddROI", "unknown exception");
+        return -1;
+    }
+}
+
+int AddROIWithParams(void* detector, int x, int y, int width, int height, float threshold, const DetectionParamsC* params) {
+    std::stringstream call_params;
+    call_params << "detector=" << detector << ", x=" << x << ", y=" << y 
+                << ", width=" << width << ", height=" << height << ", threshold=" << threshold;
+    API_LOG_CALL("AddROIWithParams", call_params.str());
+    
+    if (!detector || !params) {
+        API_LOG_RESULT("AddROIWithParams", "failed: invalid parameter");
+        return -1;
+    }
+    
+    try {
+        DefectDetector* det = static_cast<DefectDetector*>(detector);
+        
+        // 转换 DetectionParamsC 到 DetectionParams
+        DetectionParams detectionParams;
+        detectionParams.blur_kernel_size = params->blur_kernel_size;
+        detectionParams.binary_threshold = params->binary_threshold;
+        detectionParams.min_defect_size = params->min_defect_size;
+        detectionParams.detect_black_on_white = params->detect_black_on_white != 0;
+        detectionParams.detect_white_on_black = params->detect_white_on_black != 0;
+        detectionParams.similarity_threshold = params->similarity_threshold;
+        detectionParams.morphology_kernel_size = params->morphology_kernel_size;
+        
+        // 使用 ROIManager 添加 ROI（与 demo_cpp 一致）
+        int roi_id = det->getROIManager().addROI(
+            defect_detection::Rect(x, y, width, height), 
+            threshold, 
+            detectionParams);
+        
+        std::stringstream result;
+        result << (roi_id >= 0 ? "success" : "failed") << ", roi_id=" << roi_id;
+        API_LOG_RESULT("AddROIWithParams", result.str());
+        API_LOG_CONFIG("ROI", call_params.str() + ", result=" + result.str());
+        return roi_id;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("AddROIWithParams", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("AddROIWithParams", "unknown exception");
         return -1;
     }
 }
@@ -1671,5 +1716,288 @@ void ClearAPILog(void) {
     APILogger::getInstance().setLogFile("api_debug.log");
     API_LOG_CALL("ClearAPILog", "");
     API_LOG_RESULT("ClearAPILog", "log file cleared");
+}
+
+// ==================== 可视化器接口实现 ====================
+
+void* CreateVisualizer() {
+    API_LOG_CALL("CreateVisualizer", "");
+    try {
+        Visualizer* viz = new Visualizer();
+        API_LOG_RESULT("CreateVisualizer", "success, visualizer=" + std::to_string(reinterpret_cast<uintptr_t>(viz)));
+        return viz;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("CreateVisualizer", std::string("exception: ") + e.what());
+        return nullptr;
+    } catch (...) {
+        API_LOG_RESULT("CreateVisualizer", "unknown exception");
+        return nullptr;
+    }
+}
+
+void DestroyVisualizer(void* visualizer) {
+    API_LOG_CALL("DestroyVisualizer", fmtParams("visualizer", visualizer));
+    if (visualizer) {
+        delete static_cast<Visualizer*>(visualizer);
+        API_LOG_RESULT("DestroyVisualizer", "success");
+    } else {
+        API_LOG_RESULT("DestroyVisualizer", "skipped (null visualizer)");
+    }
+}
+
+int VisualizerLoadConfig(void* visualizer, const char* filepath) {
+    std::stringstream params;
+    params << "visualizer=" << visualizer << ", filepath=" << (filepath ? filepath : "null");
+    API_LOG_CALL("VisualizerLoadConfig", params.str());
+    
+    if (!visualizer || !filepath) {
+        API_LOG_RESULT("VisualizerLoadConfig", "failed: invalid parameter");
+        return -1;
+    }
+    
+    try {
+        Visualizer* viz = static_cast<Visualizer*>(visualizer);
+        bool success = viz->loadConfig(filepath);
+        API_LOG_RESULT("VisualizerLoadConfig", success ? "success" : "failed");
+        return success ? 0 : -1;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("VisualizerLoadConfig", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("VisualizerLoadConfig", "unknown exception");
+        return -1;
+    }
+}
+
+int VisualizerSetOutputDir(void* visualizer, const char* output_dir) {
+    std::stringstream params;
+    params << "visualizer=" << visualizer << ", output_dir=" << (output_dir ? output_dir : "null");
+    API_LOG_CALL("VisualizerSetOutputDir", params.str());
+    
+    if (!visualizer || !output_dir) {
+        API_LOG_RESULT("VisualizerSetOutputDir", "failed: invalid parameter");
+        return -1;
+    }
+    
+    try {
+        Visualizer* viz = static_cast<Visualizer*>(visualizer);
+        VisualizationConfig config = viz->getConfig();
+        config.output_directory = output_dir;
+        viz->setConfig(config);
+        API_LOG_RESULT("VisualizerSetOutputDir", "success");
+        return 0;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("VisualizerSetOutputDir", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("VisualizerSetOutputDir", "unknown exception");
+        return -1;
+    }
+}
+
+int VisualizerSetOutputMode(void* visualizer, int mode) {
+    std::stringstream params;
+    params << "visualizer=" << visualizer << ", mode=" << mode;
+    API_LOG_CALL("VisualizerSetOutputMode", params.str());
+    
+    if (!visualizer) {
+        API_LOG_RESULT("VisualizerSetOutputMode", "failed: null visualizer");
+        return -1;
+    }
+    
+    try {
+        Visualizer* viz = static_cast<Visualizer*>(visualizer);
+        VisualizationConfig config = viz->getConfig();
+        switch (mode) {
+            case 0: config.output_mode = OutputMode::FILE_ONLY; break;
+            case 1: config.output_mode = OutputMode::DISPLAY_ONLY; break;
+            case 2: config.output_mode = OutputMode::BOTH; break;
+            default: config.output_mode = OutputMode::BOTH; break;
+        }
+        viz->setConfig(config);
+        API_LOG_RESULT("VisualizerSetOutputMode", "success");
+        return 0;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("VisualizerSetOutputMode", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("VisualizerSetOutputMode", "unknown exception");
+        return -1;
+    }
+}
+
+int VisualizerSetDisplayDelay(void* visualizer, int delay_ms) {
+    std::stringstream params;
+    params << "visualizer=" << visualizer << ", delay_ms=" << delay_ms;
+    API_LOG_CALL("VisualizerSetDisplayDelay", params.str());
+    
+    if (!visualizer) {
+        API_LOG_RESULT("VisualizerSetDisplayDelay", "failed: null visualizer");
+        return -1;
+    }
+    
+    try {
+        Visualizer* viz = static_cast<Visualizer*>(visualizer);
+        VisualizationConfig config = viz->getConfig();
+        config.display_options.wait_key_ms = delay_ms;
+        viz->setConfig(config);
+        API_LOG_RESULT("VisualizerSetDisplayDelay", "success");
+        return 0;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("VisualizerSetDisplayDelay", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("VisualizerSetDisplayDelay", "unknown exception");
+        return -1;
+    }
+}
+
+int VisualizerSetWindowName(void* visualizer, const char* window_name) {
+    std::stringstream params;
+    params << "visualizer=" << visualizer << ", window_name=" << (window_name ? window_name : "null");
+    API_LOG_CALL("VisualizerSetWindowName", params.str());
+    
+    if (!visualizer || !window_name) {
+        API_LOG_RESULT("VisualizerSetWindowName", "failed: invalid parameter");
+        return -1;
+    }
+    
+    try {
+        Visualizer* viz = static_cast<Visualizer*>(visualizer);
+        VisualizationConfig config = viz->getConfig();
+        config.display_options.window_name = window_name;
+        viz->setConfig(config);
+        API_LOG_RESULT("VisualizerSetWindowName", "success");
+        return 0;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("VisualizerSetWindowName", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("VisualizerSetWindowName", "unknown exception");
+        return -1;
+    }
+}
+
+// 辅助函数：将C的DetectionResultC转换为C++的DetectionResult
+static DetectionResult convertCResultToCpp(DetectionResultC* c_result) {
+    DetectionResult cpp_result;
+    if (!c_result) return cpp_result;
+    
+    cpp_result.overall_passed = c_result->overall_passed != 0;
+    cpp_result.total_defect_count = c_result->total_defect_count;
+    cpp_result.processing_time_ms = c_result->processing_time_ms;
+    cpp_result.localization_time_ms = c_result->localization_time_ms;
+    cpp_result.roi_comparison_time_ms = c_result->roi_comparison_time_ms;
+    
+    // 转换localization信息
+    cpp_result.localization.success = c_result->localization.success != 0;
+    cpp_result.localization.offset_x = c_result->localization.offset_x;
+    cpp_result.localization.offset_y = c_result->localization.offset_y;
+    cpp_result.localization.rotation_angle = c_result->localization.rotation_angle;
+    cpp_result.localization.scale = c_result->localization.scale;
+    cpp_result.localization.match_quality = c_result->localization.match_quality;
+    cpp_result.localization.inlier_count = c_result->localization.inlier_count;
+    cpp_result.localization.from_external = c_result->localization.from_external != 0;
+    
+    return cpp_result;
+}
+
+int VisualizerProcessAndOutput(void* visualizer,
+                                unsigned char* test_image,
+                                int width, int height, int channels,
+                                DetectionResultC* result,
+                                const char* base_filename) {
+    std::stringstream params;
+    params << "visualizer=" << visualizer << ", image=" << width << "x" << height << "x" << channels
+           << ", base_filename=" << (base_filename ? base_filename : "null");
+    API_LOG_CALL("VisualizerProcessAndOutput", params.str());
+    
+    if (!visualizer || !test_image || !result || !base_filename) {
+        API_LOG_RESULT("VisualizerProcessAndOutput", "failed: invalid parameter");
+        return -1;
+    }
+    
+    try {
+        Visualizer* viz = static_cast<Visualizer*>(visualizer);
+        
+        int cv_type = (channels == 1) ? CV_8UC1 : CV_8UC3;
+        cv::Mat image(height, width, cv_type, test_image);
+        
+        // 转换C结果到C++结果
+        DetectionResult cpp_result = convertCResultToCpp(result);
+        
+        // 获取ROI信息 - 这里我们需要重建ROI列表
+        std::vector<ROIRegion> rois;
+        // 注意：由于C API中没有保存完整的ROI信息，这里简化处理
+        // 实际使用时，可以通过 GetROIInfo 获取
+        
+        viz->processAndOutput(image.clone(), cpp_result, rois, base_filename);
+        API_LOG_RESULT("VisualizerProcessAndOutput", "success");
+        return 0;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("VisualizerProcessAndOutput", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("VisualizerProcessAndOutput", "unknown exception");
+        return -1;
+    }
+}
+
+void VisualizerDestroyAllWindows(void* visualizer) {
+    (void)visualizer; // 参数未使用，但保留以保持API一致性
+    API_LOG_CALL("VisualizerDestroyAllWindows", "");
+    cv::destroyAllWindows();
+    API_LOG_RESULT("VisualizerDestroyAllWindows", "success");
+}
+
+// ==================== 模板图像接口实现 ====================
+
+int GetTemplateImageData(void* detector, unsigned char* buffer, int buffer_size) {
+    std::stringstream params;
+    params << "detector=" << detector << ", buffer_size=" << buffer_size;
+    API_LOG_CALL("GetTemplateImageData", params.str());
+    
+    if (!detector || !buffer || buffer_size <= 0) {
+        API_LOG_RESULT("GetTemplateImageData", "failed: invalid parameter");
+        return -1;
+    }
+    
+    try {
+        DefectDetector* det = static_cast<DefectDetector*>(detector);
+        const cv::Mat& tpl = det->getTemplate();
+        
+        if (tpl.empty()) {
+            API_LOG_RESULT("GetTemplateImageData", "failed: template not loaded");
+            return -1;
+        }
+        
+        int required_size = tpl.cols * tpl.rows * tpl.channels();
+        if (buffer_size < required_size) {
+            API_LOG_RESULT("GetTemplateImageData", "failed: buffer too small");
+            return -1;
+        }
+        
+        // 复制图像数据
+        if (tpl.isContinuous()) {
+            memcpy(buffer, tpl.data, required_size);
+        } else {
+            // 逐行复制
+            int row_size = tpl.cols * tpl.channels();
+            for (int i = 0; i < tpl.rows; ++i) {
+                memcpy(buffer + i * row_size, tpl.ptr(i), row_size);
+            }
+        }
+        
+        std::stringstream ret;
+        ret << "success, copied " << required_size << " bytes";
+        API_LOG_RESULT("GetTemplateImageData", ret.str());
+        return 0;
+    } catch (const std::exception& e) {
+        API_LOG_RESULT("GetTemplateImageData", std::string("exception: ") + e.what());
+        return -1;
+    } catch (...) {
+        API_LOG_RESULT("GetTemplateImageData", "unknown exception");
+        return -1;
+    }
 }
 

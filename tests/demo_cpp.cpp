@@ -52,6 +52,10 @@ const int DEFECT_SIZE_THRESHOLD = 100;      // 瑕疵尺寸阈值
 
 // ========== 数据结构 ==========
 
+
+
+
+
 struct ROIParams {
     int x, y, width, height;
     float threshold;

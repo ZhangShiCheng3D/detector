@@ -85,6 +85,19 @@ typedef struct {
 } LocalizationInfoC;
 
 /**
+ * @brief ROI检测参数结构（C接口）
+ */
+typedef struct {
+    int blur_kernel_size;       ///< 高斯模糊核大小
+    int binary_threshold;       ///< 二值化阈值
+    int min_defect_size;        ///< 最小瑕疵尺寸
+    int detect_black_on_white;  ///< 检测白底黑点 (0=禁用, 1=启用)
+    int detect_white_on_black;  ///< 检测黑底白点 (0=禁用, 1=启用)
+    float similarity_threshold; ///< 相似度阈值
+    int morphology_kernel_size; ///< 形态学核大小
+} DetectionParamsC;
+
+/**
  * @brief ROI区域信息结构（C接口）
  */
 typedef struct {
@@ -165,6 +178,20 @@ EXPORT_API int ImportTemplateFromFile(void* detector, const char* filepath);
  * @return ROI的ID，失败返回-1
  */
 EXPORT_API int AddROI(void* detector, int x, int y, int width, int height, float threshold);
+
+/**
+ * @brief 添加ROI区域（带详细参数）
+ * @param detector 检测器句柄
+ * @param x 左上角X坐标
+ * @param y 左上角Y坐标
+ * @param width 宽度
+ * @param height 高度
+ * @param threshold 相似度阈值 (0.0-1.0)
+ * @param params ROI检测参数
+ * @return ROI的ID，失败返回-1
+ * @note 此函数允许为每个ROI设置独立的检测参数，与demo_cpp的ROIManager::addROI行为一致
+ */
+EXPORT_API int AddROIWithParams(void* detector, int x, int y, int width, int height, float threshold, const DetectionParamsC* params);
 
 /**
  * @brief 移除ROI区域
@@ -592,6 +619,94 @@ EXPORT_API const char* GetLibraryVersion(void);
  * @return 构建信息字符串
  */
 EXPORT_API const char* GetBuildInfo(void);
+
+// ==================== 可视化器接口 ====================
+
+/**
+ * @brief 创建可视化器实例
+ * @return 可视化器句柄，失败返回NULL
+ */
+EXPORT_API void* CreateVisualizer();
+
+/**
+ * @brief 销毁可视化器实例
+ * @param visualizer 可视化器句柄
+ */
+EXPORT_API void DestroyVisualizer(void* visualizer);
+
+/**
+ * @brief 加载可视化器配置文件
+ * @param visualizer 可视化器句柄
+ * @param filepath 配置文件路径
+ * @return 0成功，非0失败
+ */
+EXPORT_API int VisualizerLoadConfig(void* visualizer, const char* filepath);
+
+/**
+ * @brief 设置可视化器输出目录
+ * @param visualizer 可视化器句柄
+ * @param output_dir 输出目录路径
+ * @return 0成功，非0失败
+ */
+EXPORT_API int VisualizerSetOutputDir(void* visualizer, const char* output_dir);
+
+/**
+ * @brief 设置可视化器输出模式
+ * @param visualizer 可视化器句柄
+ * @param mode 输出模式 (0=仅文件, 1=仅显示, 2=文件+显示)
+ * @return 0成功，非0失败
+ */
+EXPORT_API int VisualizerSetOutputMode(void* visualizer, int mode);
+
+/**
+ * @brief 设置可视化器显示延迟
+ * @param visualizer 可视化器句柄
+ * @param delay_ms 延迟毫秒数
+ * @return 0成功，非0失败
+ */
+EXPORT_API int VisualizerSetDisplayDelay(void* visualizer, int delay_ms);
+
+/**
+ * @brief 设置可视化器窗口名称
+ * @param visualizer 可视化器句柄
+ * @param window_name 窗口名称
+ * @return 0成功，非0失败
+ */
+EXPORT_API int VisualizerSetWindowName(void* visualizer, const char* window_name);
+
+/**
+ * @brief 执行可视化并输出
+ * @param visualizer 可视化器句柄
+ * @param test_image 测试图像数据
+ * @param width 图像宽度
+ * @param height 图像高度
+ * @param channels 通道数
+ * @param result 检测结果（DetectionResultC结构）
+ * @param base_filename 基础文件名
+ * @return 0成功，非0失败
+ */
+EXPORT_API int VisualizerProcessAndOutput(void* visualizer,
+                                           unsigned char* test_image,
+                                           int width, int height, int channels,
+                                           DetectionResultC* result,
+                                           const char* base_filename);
+
+/**
+ * @brief 销毁所有OpenCV窗口
+ * @param visualizer 可视化器句柄
+ */
+EXPORT_API void VisualizerDestroyAllWindows(void* visualizer);
+
+// ==================== 模板图像接口 ====================
+
+/**
+ * @brief 获取模板图像数据
+ * @param detector 检测器句柄
+ * @param buffer 输出缓冲区（需预分配，大小为 width * height * channels）
+ * @param buffer_size 缓冲区大小
+ * @return 0成功，非0失败
+ */
+EXPORT_API int GetTemplateImageData(void* detector, unsigned char* buffer, int buffer_size);
 
 // ==================== 日志控制接口 ====================
 

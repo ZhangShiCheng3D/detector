@@ -58,6 +58,15 @@ namespace DetectionUITest
         private bool _isAutoConnecting = false;
         private CancellationTokenSource _autoConnectCts;
 
+        // Socket接收图片计数器
+        private int socketImageCounter = 0;
+
+        // ROI内缩像素数（与demo_cpp一致）
+        private const int SHRINK_PIXELS = 5;
+
+        // 瑕疵尺寸阈值（与demo_cpp一致）
+        private const int DEFECT_SIZE_THRESHOLD = DefectDetectorAPI.DEFAULT_DEFECT_SIZE_THRESHOLD;
+
         #endregion
 
         #region 构造函数
@@ -92,37 +101,50 @@ namespace DetectionUITest
 
         private void InitializeDetectorParams()
         {
-            // 在detector创建后立即初始化所有参数，确保与demo_cpp行为一致
-            // 注意：这些设置必须与InitializeCustomComponents中的默认值保持一致
-            
-            // 启用自动对齐（与demo_cpp默认一致）
-            detector.EnableAutoLocalization(chkAutoAlign.Checked);
-            
-            // 设置对齐模式（与demo_cpp默认一致：ROI_ONLY）
-            switch (cmbAlignMode.SelectedIndex)
+            if (detector == null) return;
+
+            try
             {
-                case 0:
-                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.None);
-                    break;
-                case 1:
-                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.FullImage);
-                    break;
-                case 2:
-                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.RoiOnly);
-                    break;
+                // 启用自动对齐（与demo_cpp默认一致）
+                detector.EnableAutoLocalization(chkAutoAlign.Checked);
+
+                // 设置对齐模式（与demo_cpp默认一致：ROI_ONLY）
+                switch (cmbAlignMode.SelectedIndex)
+                {
+                    case 0:
+                        detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.None);
+                        break;
+                    case 1:
+                        detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.FullImage);
+                        break;
+                    case 2:
+                        detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.RoiOnly);
+                        break;
+                }
+
+                // 更新其他检测参数
+                UpdateBinaryParams();
             }
-            
-            // 更新其他检测参数
-            UpdateBinaryParams();
+            catch (Exception ex)
+            {
+                AddLog("错误", $"初始化检测器参数失败: {ex.Message}");
+            }
         }
 
         private void InitializeSocketClient()
         {
-            _socketClient = new SocketClient();
-            _socketClient.ConnectionStatusChanged += SocketClient_ConnectionStatusChanged;
-            _socketClient.LogMessage += SocketClient_LogMessage;
-            _socketClient.MessageReceived += SocketClient_MessageReceived;
-            _autoConnectCts = new CancellationTokenSource();
+            try
+            {
+                _socketClient = new SocketClient();
+                _socketClient.ConnectionStatusChanged += SocketClient_ConnectionStatusChanged;
+                _socketClient.LogMessage += SocketClient_LogMessage;
+                _socketClient.MessageReceived += SocketClient_MessageReceived;
+                _autoConnectCts = new CancellationTokenSource();
+            }
+            catch (Exception ex)
+            {
+                AddLog("错误", $"初始化Socket客户端失败: {ex.Message}");
+            }
         }
 
         private void StartAutoConnect()
@@ -167,6 +189,7 @@ namespace DetectionUITest
                         }
 
                         AddLog("Socket", $"自动连接尝试 {retryCount}/{maxRetryCount} 到 {ip}:{port}...");
+                        await Task.Delay(baseWaitTime, cancellationToken);
 
                         this.Invoke(new Action(() => { btnSocketConnect.Enabled = false; }));
 
@@ -250,6 +273,376 @@ namespace DetectionUITest
             catch { }
         }
 
+        private void LoadLastOpenPath()
+        {
+            try
+            {
+                RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\DefectDetection");
+                if (key != null)
+                {
+                    lastOpenPath = key.GetValue("LastOpenPath", "") as string;
+                    key.Close();
+                }
+            }
+            catch { }
+        }
+
+        private void SaveLastOpenPath(string path)
+        {
+            try
+            {
+                RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\DefectDetection");
+                if (key != null)
+                {
+                    key.SetValue("LastOpenPath", path);
+                    key.Close();
+                }
+            }
+            catch { }
+        }
+
+        private void InitializeCustomComponents()
+        {
+            try
+            {
+                // 初始化ROI表格
+                InitializeROIGrid();
+
+                // 初始化瑕疵表格
+                InitializeDefectGrid();
+
+                // 初始化所有图片结果表格
+                InitializeAllResultsGrid();
+
+                // 初始化日志列表
+                InitializeLogView();
+
+                // 初始化下拉框
+                cmbAlignMode.Items.Clear();
+                cmbAlignMode.Items.AddRange(new object[] {
+                    "禁用对齐",
+                    "整图对齐",
+                    "ROI区域对齐"
+                });
+                cmbAlignMode.SelectedIndex = 2; // 默认ROI区域对齐
+
+                // 设置数值控件的默认值（与demo_cpp一致）
+                InitializeNumericControls();
+
+                // 设置复选框默认值
+                chkBinaryOpt.Checked = true;
+                chkAutoAlign.Checked = true;
+
+                // 设置PictureBox属性
+                InitializePictureBoxes();
+
+                // 初始化状态标签
+                InitializeStatusLabels();
+
+                // 初始化按钮状态
+                InitializeButtonStates();
+
+                // 添加默认ROI
+                AddDefaultROI();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"初始化组件失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void InitializeROIGrid()
+        {
+            // 清空现有列
+            dgvROI.Columns.Clear();
+
+            // 添加列
+            dgvROI.Columns.Add("Index", "序号");
+            dgvROI.Columns.Add("ApiId", "API ID");
+            dgvROI.Columns.Add("X", "X");
+            dgvROI.Columns.Add("Y", "Y");
+            dgvROI.Columns.Add("Width", "宽度");
+            dgvROI.Columns.Add("Height", "高度");
+            dgvROI.Columns.Add("Threshold", "阈值");
+
+            // 设置列属性
+            dgvROI.Columns["Index"].ReadOnly = true;
+            dgvROI.Columns["ApiId"].ReadOnly = true;
+            dgvROI.Columns["X"].ReadOnly = false;
+            dgvROI.Columns["Y"].ReadOnly = false;
+            dgvROI.Columns["Width"].ReadOnly = false;
+            dgvROI.Columns["Height"].ReadOnly = false;
+            dgvROI.Columns["Threshold"].ReadOnly = false;
+
+            // 设置列宽
+            dgvROI.Columns["Index"].Width = 50;
+            dgvROI.Columns["ApiId"].Width = 60;
+            dgvROI.Columns["X"].Width = 50;
+            dgvROI.Columns["Y"].Width = 50;
+            dgvROI.Columns["Width"].Width = 60;
+            dgvROI.Columns["Height"].Width = 60;
+            dgvROI.Columns["Threshold"].Width = 80;
+
+            // 设置列对齐方式
+            dgvROI.Columns["Index"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            dgvROI.Columns["ApiId"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            dgvROI.Columns["X"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvROI.Columns["Y"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvROI.Columns["Width"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvROI.Columns["Height"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvROI.Columns["Threshold"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+
+            // 设置列格式
+            dgvROI.Columns["Threshold"].DefaultCellStyle.Format = "F2";
+
+            // 设置表格属性
+            dgvROI.AllowUserToAddRows = false;
+            dgvROI.AllowUserToDeleteRows = true;
+            dgvROI.RowHeadersVisible = false;
+            dgvROI.EditMode = DataGridViewEditMode.EditOnEnter;
+            dgvROI.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            dgvROI.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            dgvROI.MultiSelect = false;
+            dgvROI.VirtualMode = false;
+            dgvROI.DataSource = null;
+
+            // 添加事件
+            dgvROI.CellEndEdit += DgvROI_CellEndEdit;
+            dgvROI.UserDeletingRow += DgvROI_UserDeletingRow;
+        }
+
+        private void InitializeDefectGrid()
+        {
+            dgvDefects.Columns.Clear();
+            dgvDefects.Columns.Add("ROI序号", "ROI序号");
+            dgvDefects.Columns.Add("X", "X(绝对)");
+            dgvDefects.Columns.Add("Y", "Y(绝对)");
+            dgvDefects.Columns.Add("Width", "宽度");
+            dgvDefects.Columns.Add("Height", "高度");
+            dgvDefects.Columns.Add("Area", "面积");
+            dgvDefects.Columns.Add("Type", "类型");
+            dgvDefects.Columns.Add("Severity", "严重度");
+
+            // 设置列宽
+            dgvDefects.Columns["ROI序号"].Width = 70;
+            dgvDefects.Columns["X"].Width = 80;
+            dgvDefects.Columns["Y"].Width = 80;
+            dgvDefects.Columns["Width"].Width = 70;
+            dgvDefects.Columns["Height"].Width = 70;
+            dgvDefects.Columns["Area"].Width = 70;
+            dgvDefects.Columns["Type"].Width = 100;
+            dgvDefects.Columns["Severity"].Width = 80;
+
+            dgvDefects.ReadOnly = true;
+            dgvDefects.RowHeadersVisible = false;
+            dgvDefects.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            dgvDefects.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            dgvDefects.MultiSelect = false;
+
+            dgvDefects.CellDoubleClick += DgvDefects_CellDoubleClick;
+        }
+
+        private void InitializeAllResultsGrid()
+        {
+            dgvAllResults.Columns.Clear();
+
+            dgvAllResults.Columns.Add("ImageName", "图片名称");
+            dgvAllResults.Columns.Add("Similarity", "相似度(%)");
+            dgvAllResults.Columns.Add("DefectCount", "瑕疵数量");
+            dgvAllResults.Columns.Add("Result", "结果");
+
+            dgvAllResults.Columns["ImageName"].ReadOnly = true;
+            dgvAllResults.Columns["Similarity"].ReadOnly = true;
+            dgvAllResults.Columns["DefectCount"].ReadOnly = true;
+            dgvAllResults.Columns["Result"].ReadOnly = true;
+
+            dgvAllResults.Columns["ImageName"].Width = 180;
+            dgvAllResults.Columns["Similarity"].Width = 80;
+            dgvAllResults.Columns["DefectCount"].Width = 80;
+            dgvAllResults.Columns["Result"].Width = 60;
+
+            dgvAllResults.Columns["Similarity"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvAllResults.Columns["DefectCount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvAllResults.Columns["Result"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+
+            dgvAllResults.Columns["Similarity"].DefaultCellStyle.Format = "F1";
+            dgvAllResults.Columns["DefectCount"].DefaultCellStyle.Format = "F0";
+
+            dgvAllResults.AllowUserToAddRows = false;
+            dgvAllResults.AllowUserToDeleteRows = false;
+            dgvAllResults.ReadOnly = true;
+            dgvAllResults.RowHeadersVisible = false;
+            dgvAllResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            dgvAllResults.MultiSelect = false;
+            dgvAllResults.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
+            dgvAllResults.CellDoubleClick += DgvAllResults_CellDoubleClick;
+        }
+
+        private void InitializeLogView()
+        {
+            listViewLog.View = View.Details;
+            listViewLog.FullRowSelect = true;
+            listViewLog.GridLines = true;
+            listViewLog.Columns.Clear();
+            listViewLog.Columns.Add("时间", 100);
+            listViewLog.Columns.Add("类型", 80);
+            listViewLog.Columns.Add("信息", 1000);
+        }
+
+        private void InitializeNumericControls()
+        {
+            nudBinaryThreshold.Minimum = 0;
+            nudBinaryThreshold.Maximum = 255;
+            nudBinaryThreshold.Value = 30;
+            nudBinaryThreshold.Increment = 1;
+
+            nudEdgeTol.Minimum = 0;
+            nudEdgeTol.Maximum = 20;
+            nudEdgeTol.Value = 2;
+            nudEdgeTol.Increment = 1;
+
+            nudNoiseSize.Minimum = 0;
+            nudNoiseSize.Maximum = 50;
+            nudNoiseSize.Value = 3;
+            nudNoiseSize.Increment = 1;
+
+            nudMinArea.Minimum = 1;
+            nudMinArea.Maximum = 500;
+            nudMinArea.Value = 20;
+            nudMinArea.Increment = 1;
+
+            nudSimThresh.Minimum = 0;
+            nudSimThresh.Maximum = 100;
+            nudSimThresh.Value = 90;
+            nudSimThresh.DecimalPlaces = 1;
+            nudSimThresh.Increment = 1;
+        }
+
+        private void InitializePictureBoxes()
+        {
+            pictureBoxTemplate.SizeMode = PictureBoxSizeMode.Zoom;
+            pictureBoxTest.SizeMode = PictureBoxSizeMode.Zoom;
+            pictureBoxTemplate.BackColor = Color.White;
+            pictureBoxTest.BackColor = Color.White;
+            pictureBoxTemplate.BorderStyle = BorderStyle.FixedSingle;
+            pictureBoxTest.BorderStyle = BorderStyle.FixedSingle;
+        }
+
+        private void InitializeStatusLabels()
+        {
+            lblPassCount.Text = "通过: 0";
+            lblFailCount.Text = "失败: 0";
+            lblTotalCount.Text = "总计: 0";
+            lblCurrentImage.Text = "当前: 未选择";
+
+            progressBar.Minimum = 0;
+            progressBar.Maximum = 100;
+            progressBar.Value = 0;
+        }
+
+        private void InitializeButtonStates()
+        {
+            btnPrev.Enabled = false;
+            btnNext.Enabled = false;
+            btnSingleCompare.Enabled = false;
+            btnContinuousCompare.Enabled = false;
+            btnStop.Enabled = false;
+            btnSocketDisconnect.Enabled = false;
+        }
+
+        private void AddDefaultROI()
+        {
+            try
+            {
+                var roi = new ROIItem
+                {
+                    UiIndex = 1,
+                    X = 200,
+                    Y = 420,
+                    Width = 820,
+                    Height = 320,
+                    Threshold = 0.8f
+                };
+
+                roiList.Add(roi);
+
+                if (detector != null && detector.IsInitialized)
+                {
+                    int x = roi.X + SHRINK_PIXELS;
+                    int y = roi.Y + SHRINK_PIXELS;
+                    int width = roi.Width - 2 * SHRINK_PIXELS;
+                    int height = roi.Height - 2 * SHRINK_PIXELS;
+
+                    if (width <= 0 || height <= 0)
+                    {
+                        x = roi.X;
+                        y = roi.Y;
+                        width = roi.Width;
+                        height = roi.Height;
+                    }
+
+                    int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
+                    roi.ApiId = apiId;
+                    uiIndexToApiId[roi.UiIndex] = apiId;
+                    apiIdToUiIndex[apiId] = roi.UiIndex;
+
+                    if (detector.IsTemplateLoaded())
+                    {
+                        detector.ExtractROITemplates();
+                    }
+                }
+
+                UpdateROIGrid();
+                AddLog("ROI", $"添加默认ROI: ({roi.X},{roi.Y}) {roi.Width}x{roi.Height}");
+            }
+            catch (Exception ex)
+            {
+                AddLog("错误", $"添加默认ROI失败: {ex.Message}");
+            }
+        }
+
+        private void SetupEventHandlers()
+        {
+            this.btnSelectTemplate.Click += BtnSelectTemplate_Click;
+            this.btnSelectFolder.Click += BtnSelectFolder_Click;
+            this.btnBrowseCSV.Click += BtnBrowseCSV_Click;
+            this.btnPrev.Click += BtnPrev_Click;
+            this.btnNext.Click += BtnNext_Click;
+            this.btnSingleCompare.Click += BtnSingleCompare_Click;
+            this.btnContinuousCompare.Click += BtnContinuousCompare_Click;
+            this.btnStop.Click += BtnStop_Click;
+            this.btnAddROI.Click += BtnAddROI_Click;
+            this.btnRemoveROI.Click += BtnRemoveROI_Click;
+            this.btnClearROI.Click += BtnClearROI_Click;
+            this.btnClearAll.Click += BtnClearAll_Click;
+            this.btnSocketConnect.Click += BtnSocketConnect_Click;
+            this.btnSocketDisconnect.Click += BtnSocketDisconnect_Click;
+
+            this.chkAutoAlign.CheckedChanged += ChkAutoAlign_CheckedChanged;
+            this.cmbAlignMode.SelectedIndexChanged += CmbAlignMode_SelectedIndexChanged;
+            this.chkBinaryOpt.CheckedChanged += ChkBinaryOpt_CheckedChanged;
+            this.chkAutoReconnect.CheckedChanged += ChkAutoReconnect_CheckedChanged;
+
+            this.nudBinaryThreshold.ValueChanged += Parameter_ValueChanged;
+            this.nudEdgeTol.ValueChanged += Parameter_ValueChanged;
+            this.nudNoiseSize.ValueChanged += Parameter_ValueChanged;
+            this.nudMinArea.ValueChanged += Parameter_ValueChanged;
+            this.nudSimThresh.ValueChanged += Parameter_ValueChanged;
+
+            this.pictureBoxTest.MouseDown += PictureBoxTest_MouseDown;
+            this.pictureBoxTest.MouseMove += PictureBoxTest_MouseMove;
+            this.pictureBoxTest.MouseUp += PictureBoxTest_MouseUp;
+            this.pictureBoxTest.Paint += PictureBoxTest_Paint;
+            this.pictureBoxTest.Resize += (s, e) => pictureBoxTest.Invalidate();
+
+            this.Resize += Form1_Resize;
+        }
+
+        #endregion
+
+        #region Socket事件处理方法
+
         private void SocketClient_ConnectionStatusChanged(object sender, bool connected)
         {
             if (this.InvokeRequired)
@@ -258,18 +651,25 @@ namespace DetectionUITest
                 return;
             }
 
-            btnSocketConnect.Enabled = !connected;
-            btnSocketDisconnect.Enabled = connected;
-            lblSocketStatus.Text = connected ? "已连接" : "未连接";
-            lblSocketStatus.ForeColor = connected ? Color.Green : Color.Red;
+            try
+            {
+                btnSocketConnect.Enabled = !connected;
+                btnSocketDisconnect.Enabled = connected;
+                lblSocketStatus.Text = connected ? "已连接" : "未连接";
+                lblSocketStatus.ForeColor = connected ? Color.Green : Color.Red;
 
-            if (connected)
-            {
-                AddLog("Socket", $"已连接到服务器 {_socketClient.ServerIp}:{_socketClient.ServerPort}");
+                if (connected)
+                {
+                    AddLog("Socket", $"已连接到服务器 {_socketClient.ServerIp}:{_socketClient.ServerPort}");
+                }
+                else
+                {
+                    AddLog("Socket", "与服务器的连接已断开");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                AddLog("Socket", "与服务器的连接已断开");
+                AddLog("错误", $"更新连接状态失败: {ex.Message}");
             }
         }
 
@@ -414,6 +814,16 @@ namespace DetectionUITest
                 string tempFile = Path.GetTempFileName() + ".png";
                 File.WriteAllBytes(tempFile, imageData);
 
+                string displayName = $"Socket_{DateTime.Now:yyyyMMddHHmmssfff}_{socketImageCounter + 1}.png";
+
+                this.Invoke(new Action(() =>
+                {
+                    socketImageCounter++;
+                    testFiles.Add(tempFile);
+                    lblTotalCount.Text = $"总计: {testFiles.Count}";
+                    AddLog("Socket", $"图片已加入测试列表: {displayName}");
+                }));
+
                 DefectDetectorAPI.DetectionResultDetailed detailedResult = default;
                 DefectDetectorAPI.ROIResult[] roiResults = null;
                 DefectDetectorAPI.DefectInfo[] defects = null;
@@ -421,14 +831,12 @@ namespace DetectionUITest
                 await Task.Run(() =>
                 {
                     this.Invoke(new Action(UpdateBinaryParams));
-                    // 只调用一次检测（与demo_cpp一致）
                     detailedResult = detector.DetectFromFileEx(tempFile);
                     roiResults = detector.GetLastROIResults();
                     defects = detailedResult.Defects;
                 });
 
-                // 与demo_cpp一致的结果判定：只根据瑕疵面积判断 (DEFECT_SIZE_THRESHOLD = 100)
-                int significantDefectCount = defects?.Count(d => d.Area >= 100) ?? 0;
+                int significantDefectCount = defects?.Count(d => d.Area >= DEFECT_SIZE_THRESHOLD) ?? 0;
                 bool passed = significantDefectCount == 0;
                 int defectCount = significantDefectCount;
 
@@ -445,44 +853,39 @@ namespace DetectionUITest
 
                 this.Invoke(new Action(() =>
                 {
-                    if (pictureBoxTest.Image != null)
-                    {
-                        pictureBoxTest.Image.Dispose();
-                        pictureBoxTest.Image = null;
-                    }
+                    bool hadPreviousResult = imageResults.ContainsKey(tempFile);
+                    bool wasPreviousPassed = false;
 
-                    var img = Image.FromFile(tempFile);
-                    pictureBoxTest.Image = new Bitmap(img);
-                    img.Dispose();
-
-                    string fileName = Path.GetFileName(tempFile);
-                    int index = testFiles.FindIndex(f => Path.GetFileName(f) == fileName);
-                    if (index >= 0)
+                    if (hadPreviousResult)
                     {
-                        currentIndex = index;
-                        lblCurrentImage.Text = $"当前: {fileName} ({index + 1}/{testFiles.Count})";
-                    }
-                    else
-                    {
-                        lblCurrentImage.Text = $"当前: {fileName} (Socket接收)";
+                        wasPreviousPassed = imageResults[tempFile].Passed;
                     }
 
                     var tempDetailedResult = new DefectDetectorAPI.DetectionResultDetailed
                     {
-                        ResultCode = result.ResultCode,
+                        ResultCode = detailedResult.ResultCode,
                         Defects = defects ?? new DefectDetectorAPI.DefectInfo[0],
                         ActualDefectCount = defects?.Length ?? 0,
-                        ProcessingTime = result.ProcessingTimeMs,
-                        LocalizationTime = result.LocalizationTimeMs,
-                        ROIComparisonTime = result.ROIComparisonTimeMs
+                        ProcessingTime = detailedResult.ProcessingTime,
+                        LocalizationTime = detailedResult.LocalizationTime,
+                        ROIComparisonTime = detailedResult.ROIComparisonTime
                     };
 
-                    ProcessResult(tempFile, result, roiResults, tempDetailedResult);
+                    ProcessResult(tempFile, detailedResult, roiResults, hadPreviousResult, wasPreviousPassed, displayName);
+
+                    if (testFiles.Count == 1 || currentIndex == -1)
+                    {
+                        currentIndex = testFiles.Count - 1;
+                        LoadTestImage(currentIndex);
+                        LoadCurrentImageResults();
+                    }
+
+                    UpdateStats();
+                    UpdateAllResultsGrid();
                     pictureBoxTest.Invalidate();
                     dgvDefects.Refresh();
-                    UpdateStats();
 
-                    AddLog("Socket", "UI更新完成");
+                    AddLog("Socket", $"UI更新完成，当前共 {testFiles.Count} 张图片");
                 }));
 
                 AddLog("Socket", $"检测完成: {(passed ? "通过" : "失败")}, 瑕疵数:{defectCount}");
@@ -516,9 +919,6 @@ namespace DetectionUITest
 
                         AddLog("Socket", $"已清除现有ROI");
 
-                        // ROI内缩像素数（与demo_cpp一致）
-                        const int shrinkPixels = 5;
-
                         for (int i = 0; i < rois.Length; i++)
                         {
                             var roi = rois[i];
@@ -529,13 +929,11 @@ namespace DetectionUITest
                                 continue;
                             }
 
-                            // 应用内缩
-                            int x = roi.X + shrinkPixels;
-                            int y = roi.Y + shrinkPixels;
-                            int width = roi.Width - 2 * shrinkPixels;
-                            int height = roi.Height - 2 * shrinkPixels;
+                            int x = roi.X + SHRINK_PIXELS;
+                            int y = roi.Y + SHRINK_PIXELS;
+                            int width = roi.Width - 2 * SHRINK_PIXELS;
+                            int height = roi.Height - 2 * SHRINK_PIXELS;
 
-                            // 确保内缩后尺寸有效
                             if (width <= 0 || height <= 0)
                             {
                                 x = roi.X;
@@ -550,7 +948,7 @@ namespace DetectionUITest
                             {
                                 UiIndex = i + 1,
                                 ApiId = apiId,
-                                X = roi.X,  // 界面显示原始坐标
+                                X = roi.X,
                                 Y = roi.Y,
                                 Width = roi.Width,
                                 Height = roi.Height,
@@ -561,18 +959,17 @@ namespace DetectionUITest
                             uiIndexToApiId[i + 1] = apiId;
                             apiIdToUiIndex[apiId] = i + 1;
 
-                            AddLog("Socket", $"添加ROI {newRoi.UiIndex}: ({x},{y}) {width}x{height} (原始: {roi.X},{roi.Y} {roi.Width}x{roi.Height}, 内缩{shrinkPixels}px) 阈值:{newRoi.Threshold}");
+                            AddLog("Socket", $"添加ROI {newRoi.UiIndex}: ({x},{y}) {width}x{height} (原始: {roi.X},{roi.Y} {roi.Width}x{roi.Height}, 内缩{SHRINK_PIXELS}px) 阈值:{newRoi.Threshold}");
                         }
 
-                        // 如果模板已加载，提取ROI模板
                         if (detector.IsTemplateLoaded())
                         {
                             detector.ExtractROITemplates();
-                            AddLog("Socket", $"ROI配置完成，共 {roiList.Count} 个ROI（内缩{shrinkPixels}px），已提取ROI模板，UI已更新");
+                            AddLog("Socket", $"ROI配置完成，共 {roiList.Count} 个ROI（内缩{SHRINK_PIXELS}px），已提取ROI模板，UI已更新");
                         }
                         else
                         {
-                            AddLog("Socket", $"ROI配置完成，共 {roiList.Count} 个ROI（内缩{shrinkPixels}px），模板未加载跳过提取，UI已更新");
+                            AddLog("Socket", $"ROI配置完成，共 {roiList.Count} 个ROI（内缩{SHRINK_PIXELS}px），模板未加载跳过提取，UI已更新");
                         }
 
                         UpdateROIGrid();
@@ -684,259 +1081,9 @@ namespace DetectionUITest
             await _socketClient.SendStatusAsync("pong");
         }
 
-        private float GetMinSimilarity(ROIResult[] results)
-        {
-            if (results == null || results.Length == 0) return 1.0f;
-            return results.Min(r => r.Similarity);
-        }
-
-        private async void BtnSocketConnect_Click(object sender, EventArgs e)
-        {
-            string ip = txtServerIP.Text.Trim();
-            if (!int.TryParse(txtServerPort.Text, out int port) || port <= 0 || port > 65535)
-            {
-                MessageBox.Show("请输入有效的端口号(1-65535)", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            btnSocketConnect.Enabled = false;
-            try
-            {
-                _socketClient.AutoReconnect = chkAutoReconnect.Checked;
-                await _socketClient.StartAsync(ip, port);
-
-                if (_socketClient.IsConnected)
-                {
-                    SaveSocketConfig();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"连接失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                btnSocketConnect.Enabled = true;
-            }
-        }
-
-        private void BtnSocketDisconnect_Click(object sender, EventArgs e)
-        {
-            _socketClient.Stop();
-        }
-
-        private void LoadLastOpenPath()
-        {
-            try
-            {
-                RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\DefectDetection");
-                if (key != null)
-                {
-                    lastOpenPath = key.GetValue("LastOpenPath", "") as string;
-                    key.Close();
-                }
-            }
-            catch { }
-        }
-
-        private void SaveLastOpenPath(string path)
-        {
-            try
-            {
-                RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\DefectDetection");
-                if (key != null)
-                {
-                    key.SetValue("LastOpenPath", path);
-                    key.Close();
-                }
-            }
-            catch { }
-        }
-
-        private void InitializeCustomComponents()
-        {
-            dgvROI.Columns.Add("Index", "序号");
-            dgvROI.Columns.Add("ApiId", "API ID");
-            dgvROI.Columns.Add("X", "X");
-            dgvROI.Columns.Add("Y", "Y");
-            dgvROI.Columns.Add("Width", "宽度");
-            dgvROI.Columns.Add("Height", "高度");
-            dgvROI.Columns.Add("Threshold", "阈值");
-
-            dgvROI.AllowUserToAddRows = false;
-            dgvROI.AllowUserToDeleteRows = true;
-            dgvROI.RowHeadersVisible = false;
-            dgvROI.EditMode = DataGridViewEditMode.EditOnEnter;
-            dgvROI.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvROI.CellEndEdit += DgvROI_CellEndEdit;
-
-            dgvROI.Columns["Index"].ReadOnly = true;
-            dgvROI.Columns["ApiId"].ReadOnly = true;
-
-            dgvDefects.Columns.Add("ROI序号", "ROI序号");
-            dgvDefects.Columns.Add("ROI_ID", "ROI ID");
-            dgvDefects.Columns.Add("X", "X(绝对)");
-            dgvDefects.Columns.Add("Y", "Y(绝对)");
-            dgvDefects.Columns.Add("Width", "宽度");
-            dgvDefects.Columns.Add("Height", "高度");
-            dgvDefects.Columns.Add("Area", "面积");
-            dgvDefects.Columns.Add("Type", "类型");
-            dgvDefects.Columns.Add("Severity", "严重度");
-            dgvDefects.ReadOnly = true;
-            dgvDefects.RowHeadersVisible = false;
-            dgvDefects.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvDefects.CellDoubleClick += DgvDefects_CellDoubleClick;
-
-            listViewLog.View = View.Details;
-            listViewLog.FullRowSelect = true;
-            listViewLog.GridLines = true;
-            listViewLog.Columns.Add("时间", 100);
-            listViewLog.Columns.Add("类型", 80);
-            listViewLog.Columns.Add("信息", 1000);
-
-            cmbAlignMode.Items.AddRange(new object[] {
-                "禁用对齐",
-                "整图对齐",
-                "ROI区域对齐"
-            });
-            cmbAlignMode.SelectedIndex = 2;
-
-            // 与demo_cpp对齐的默认参数值
-            nudBinaryThreshold.Minimum = 0;
-            nudBinaryThreshold.Maximum = 255;
-            nudBinaryThreshold.Value = 30;  // C++默认: 30
-            nudBinaryThreshold.Increment = 1;
-
-            nudEdgeTol.Minimum = 0;
-            nudEdgeTol.Maximum = 20;
-            nudEdgeTol.Value = 2;  // C++默认: 2
-            nudEdgeTol.Increment = 1;
-
-            nudNoiseSize.Minimum = 0;
-            nudNoiseSize.Maximum = 50;
-            nudNoiseSize.Value = 3;  // C++默认: 3
-            nudNoiseSize.Increment = 1;
-
-            nudMinArea.Minimum = 1;
-            nudMinArea.Maximum = 500;
-            nudMinArea.Value = 20;  // C++默认: 20
-            nudMinArea.Increment = 1;
-
-            nudSimThresh.Minimum = 0;
-            nudSimThresh.Maximum = 100;
-            nudSimThresh.Value = 90;  // C++默认: 90 (0.90 * 100)
-            nudSimThresh.DecimalPlaces = 1;
-
-            chkBinaryOpt.Checked = true;
-            chkAutoAlign.Checked = true;
-
-            txtCSVPath.ReadOnly = true;
-
-            pictureBoxTemplate.SizeMode = PictureBoxSizeMode.Zoom;
-            pictureBoxTest.SizeMode = PictureBoxSizeMode.Zoom;
-            pictureBoxTemplate.BackColor = Color.White;
-            pictureBoxTest.BackColor = Color.White;
-            pictureBoxTemplate.BorderStyle = BorderStyle.FixedSingle;
-            pictureBoxTest.BorderStyle = BorderStyle.FixedSingle;
-
-            lblPassCount.Text = "通过: 0";
-            lblFailCount.Text = "失败: 0";
-            lblTotalCount.Text = "总计: 0";
-            lblCurrentImage.Text = "当前: 未选择";
-
-            progressBar.Minimum = 0;
-            progressBar.Maximum = 100;
-            progressBar.Value = 0;
-
-            btnPrev.Enabled = false;
-            btnNext.Enabled = false;
-            btnSingleCompare.Enabled = false;
-            btnContinuousCompare.Enabled = false;
-            btnStop.Enabled = false;
-
-            AddDefaultROI();
-        }
-
-        private void AddDefaultROI()
-        {
-            var roi = new ROIItem
-            {
-                UiIndex = 1,
-                X = 200,
-                Y = 420,
-                Width = 820,
-                Height = 320,
-                Threshold = 0.8f
-            };
-
-            roiList.Add(roi);
-
-            if (detector != null && detector.IsInitialized)
-            {
-                // ROI内缩像素数（与demo_cpp一致）
-                const int shrinkPixels = 5;
-                int x = roi.X + shrinkPixels;
-                int y = roi.Y + shrinkPixels;
-                int width = roi.Width - 2 * shrinkPixels;
-                int height = roi.Height - 2 * shrinkPixels;
-
-                // 确保内缩后尺寸有效
-                if (width <= 0 || height <= 0)
-                {
-                    x = roi.X;
-                    y = roi.Y;
-                    width = roi.Width;
-                    height = roi.Height;
-                }
-
-                int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
-                roi.ApiId = apiId;
-                uiIndexToApiId[roi.UiIndex] = apiId;
-                apiIdToUiIndex[apiId] = roi.UiIndex;
-
-                // 如果模板已加载，提取ROI模板
-                if (detector.IsTemplateLoaded())
-                {
-                    detector.ExtractROITemplates();
-                }
-            }
-
-            UpdateROIGrid();
-        }
-
-        private void SetupEventHandlers()
-        {
-            this.btnSelectTemplate.Click += BtnSelectTemplate_Click;
-            this.btnSelectFolder.Click += BtnSelectFolder_Click;
-            this.btnBrowseCSV.Click += BtnBrowseCSV_Click;
-            this.btnPrev.Click += BtnPrev_Click;
-            this.btnNext.Click += BtnNext_Click;
-            this.btnSingleCompare.Click += BtnSingleCompare_Click;
-            this.btnContinuousCompare.Click += BtnContinuousCompare_Click;
-            this.btnStop.Click += BtnStop_Click;
-            this.btnAddROI.Click += BtnAddROI_Click;
-            this.btnRemoveROI.Click += BtnRemoveROI_Click;
-            this.btnClearROI.Click += BtnClearROI_Click;
-            this.btnSocketConnect.Click += BtnSocketConnect_Click;
-            this.btnSocketDisconnect.Click += BtnSocketDisconnect_Click;
-
-            this.chkAutoAlign.CheckedChanged += ChkAutoAlign_CheckedChanged;
-            this.cmbAlignMode.SelectedIndexChanged += CmbAlignMode_SelectedIndexChanged;
-            this.chkBinaryOpt.CheckedChanged += ChkBinaryOpt_CheckedChanged;
-
-            this.nudBinaryThreshold.ValueChanged += Parameter_ValueChanged;
-            this.nudEdgeTol.ValueChanged += Parameter_ValueChanged;
-            this.nudNoiseSize.ValueChanged += Parameter_ValueChanged;
-            this.nudMinArea.ValueChanged += Parameter_ValueChanged;
-            this.nudSimThresh.ValueChanged += Parameter_ValueChanged;
-
-            this.pictureBoxTest.MouseDown += PictureBoxTest_MouseDown;
-            this.pictureBoxTest.MouseMove += PictureBoxTest_MouseMove;
-            this.pictureBoxTest.MouseUp += PictureBoxTest_MouseUp;
-            this.pictureBoxTest.Paint += PictureBoxTest_Paint;
-            this.pictureBoxTest.Resize += (s, e) => pictureBoxTest.Invalidate();
-        }
-
         #endregion
 
-        #region 事件处理方法
+        #region 按钮事件处理方法
 
         private void BtnSelectTemplate_Click(object sender, EventArgs e)
         {
@@ -959,6 +1106,11 @@ namespace DetectionUITest
                         {
                             MessageBox.Show("无法导入模板文件", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                             return;
+                        }
+
+                        if (pictureBoxTemplate.Image != null)
+                        {
+                            pictureBoxTemplate.Image.Dispose();
                         }
 
                         var img = Image.FromFile(templateFile);
@@ -989,6 +1141,7 @@ namespace DetectionUITest
                     catch (Exception ex)
                     {
                         MessageBox.Show($"加载模板失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        AddLog("错误", $"加载模板失败: {ex.Message}");
                     }
                 }
             }
@@ -1011,7 +1164,7 @@ namespace DetectionUITest
                     SaveLastOpenPath(lastOpenPath);
 
                     var supportedExtensions = new[] { ".bmp", ".jpg", ".jpeg", ".png" };
-                    testFiles = dlg.FileNames
+                    var selectedFiles = dlg.FileNames
                         .Where(f => supportedExtensions.Contains(Path.GetExtension(f).ToLower()))
                         .OrderBy(f => f)
                         .ToList();
@@ -1019,20 +1172,26 @@ namespace DetectionUITest
                     if (!string.IsNullOrEmpty(templateFile))
                     {
                         string templateName = Path.GetFileName(templateFile).ToLower();
-                        testFiles = testFiles.Where(f =>
+                        selectedFiles = selectedFiles.Where(f =>
                             Path.GetFileName(f).ToLower() != templateName).ToList();
                     }
 
+                    testFiles.AddRange(selectedFiles);
+
                     lblTotalCount.Text = $"总计: {testFiles.Count}";
-                    AddLog("系统", $"选择了 {testFiles.Count} 张测试图像");
+                    AddLog("系统", $"添加了 {selectedFiles.Count} 张测试图像，总计 {testFiles.Count} 张");
 
                     if (testFiles.Count > 0)
                     {
-                        currentIndex = 0;
-                        LoadTestImage(currentIndex);
+                        if (currentIndex == -1)
+                        {
+                            currentIndex = 0;
+                            LoadTestImage(currentIndex);
+                            LoadCurrentImageResults();
+                        }
 
-                        btnPrev.Enabled = true;
-                        btnNext.Enabled = testFiles.Count > 1;
+                        btnPrev.Enabled = currentIndex > 0;
+                        btnNext.Enabled = currentIndex < testFiles.Count - 1;
 
                         if (!string.IsNullOrEmpty(templateFile))
                         {
@@ -1040,10 +1199,8 @@ namespace DetectionUITest
                             btnContinuousCompare.Enabled = true;
                         }
                     }
-                    else
-                    {
-                        MessageBox.Show("没有选择有效的图像文件", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
+
+                    UpdateAllResultsGrid();
                 }
             }
         }
@@ -1059,7 +1216,6 @@ namespace DetectionUITest
 
                 if (dlg.ShowDialog() == DialogResult.OK)
                 {
-                    txtCSVPath.Text = dlg.FileName;
                     lastOpenPath = Path.GetDirectoryName(dlg.FileName);
                     SaveLastOpenPath(lastOpenPath);
                     LoadLocationData(dlg.FileName);
@@ -1073,6 +1229,7 @@ namespace DetectionUITest
             {
                 currentIndex--;
                 LoadTestImage(currentIndex);
+                LoadCurrentImageResults();
                 btnNext.Enabled = true;
                 btnPrev.Enabled = currentIndex > 0;
             }
@@ -1084,6 +1241,7 @@ namespace DetectionUITest
             {
                 currentIndex++;
                 LoadTestImage(currentIndex);
+                LoadCurrentImageResults();
                 btnPrev.Enabled = true;
                 btnNext.Enabled = currentIndex < testFiles.Count - 1;
             }
@@ -1130,11 +1288,7 @@ namespace DetectionUITest
             btnAddROI.Enabled = false;
             btnRemoveROI.Enabled = false;
             btnClearROI.Enabled = false;
-
-            passCount = 0;
-            failCount = 0;
-            UpdateStats();
-            imageResults.Clear();
+            btnClearAll.Enabled = false;
 
             progressBar.Maximum = testFiles.Count;
             progressBar.Value = 0;
@@ -1158,6 +1312,7 @@ namespace DetectionUITest
                 btnAddROI.Enabled = true;
                 btnRemoveROI.Enabled = true;
                 btnClearROI.Enabled = true;
+                btnClearAll.Enabled = true;
             }
         }
 
@@ -1177,90 +1332,120 @@ namespace DetectionUITest
                 return;
             }
 
-            int newUiIndex = roiList.Count + 1;
-            var roi = new ROIItem
+            try
             {
-                UiIndex = newUiIndex,
-                X = 100,
-                Y = 100,
-                Width = 200,
-                Height = 150,
-                Threshold = 0.8f
-            };
+                int newUiIndex = roiList.Count + 1;
+                var roi = new ROIItem
+                {
+                    UiIndex = newUiIndex,
+                    X = 100,
+                    Y = 100,
+                    Width = 200,
+                    Height = 150,
+                    Threshold = 0.8f
+                };
 
-            // ROI内缩像素数（与demo_cpp一致）
-            const int shrinkPixels = 5;
-            int x = roi.X + shrinkPixels;
-            int y = roi.Y + shrinkPixels;
-            int width = roi.Width - 2 * shrinkPixels;
-            int height = roi.Height - 2 * shrinkPixels;
+                int x = roi.X + SHRINK_PIXELS;
+                int y = roi.Y + SHRINK_PIXELS;
+                int width = roi.Width - 2 * SHRINK_PIXELS;
+                int height = roi.Height - 2 * SHRINK_PIXELS;
 
-            // 确保内缩后尺寸有效
-            if (width <= 0 || height <= 0)
-            {
-                x = roi.X;
-                y = roi.Y;
-                width = roi.Width;
-                height = roi.Height;
+                if (width <= 0 || height <= 0)
+                {
+                    x = roi.X;
+                    y = roi.Y;
+                    width = roi.Width;
+                    height = roi.Height;
+                }
+
+                int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
+                roi.ApiId = apiId;
+                roiList.Add(roi);
+
+                uiIndexToApiId[roi.UiIndex] = apiId;
+                apiIdToUiIndex[apiId] = roi.UiIndex;
+
+                if (detector.IsTemplateLoaded())
+                {
+                    detector.ExtractROITemplates();
+                }
+
+                UpdateROIGrid();
+                pictureBoxTest.Invalidate();
+
+                AddLog("ROI", $"添加ROI {roi.UiIndex} (API ID:{apiId}): ({x},{y}) {width}x{height} (原始: {roi.X},{roi.Y} {roi.Width}x{roi.Height}, 内缩{SHRINK_PIXELS}px)");
             }
-
-            int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
-            roi.ApiId = apiId;
-            roiList.Add(roi);
-
-            uiIndexToApiId[roi.UiIndex] = apiId;
-            apiIdToUiIndex[apiId] = roi.UiIndex;
-
-            // 如果模板已加载，提取ROI模板
-            if (detector.IsTemplateLoaded())
+            catch (Exception ex)
             {
-                detector.ExtractROITemplates();
+                AddLog("错误", $"添加ROI失败: {ex.Message}");
+                MessageBox.Show($"添加ROI失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-
-            UpdateROIGrid();
-            pictureBoxTest.Invalidate();
-
-            AddLog("ROI", $"添加ROI {roi.UiIndex} (API ID:{apiId}): ({x},{y}) {width}x{height} (原始: {roi.X},{roi.Y} {roi.Width}x{roi.Height}, 内缩{shrinkPixels}px)");
         }
 
         private void BtnRemoveROI_Click(object sender, EventArgs e)
         {
-            if (dgvROI.SelectedRows.Count > 0)
+            try
             {
-                int index = dgvROI.SelectedRows[0].Index;
-                if (index >= 0 && index < roiList.Count)
+                if (dgvROI.SelectedRows.Count > 0)
                 {
-                    var roi = roiList[index];
-
-                    detector.RemoveROI(roi.ApiId);
-                    uiIndexToApiId.Remove(roi.UiIndex);
-                    apiIdToUiIndex.Remove(roi.ApiId);
-                    roiList.RemoveAt(index);
-
-                    for (int i = 0; i < roiList.Count; i++)
+                    int index = dgvROI.SelectedRows[0].Index;
+                    if (index >= 0 && index < roiList.Count)
                     {
-                        int oldUiIndex = roiList[i].UiIndex;
-                        int newUiIndex = i + 1;
+                        var roi = roiList[index];
 
-                        if (oldUiIndex != newUiIndex)
+                        // 确认删除
+                        var result = MessageBox.Show($"确定要删除ROI {roi.UiIndex} 吗？",
+                            "确认删除", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+                        if (result != DialogResult.Yes)
+                            return;
+
+                        // 结束编辑状态
+                        dgvROI.EndEdit();
+                        dgvROI.CurrentCell = null;
+
+                        // 从检测器中移除ROI
+                        detector.RemoveROI(roi.ApiId);
+
+                        // 清理映射表
+                        uiIndexToApiId.Remove(roi.UiIndex);
+                        apiIdToUiIndex.Remove(roi.ApiId);
+
+                        // 从列表中移除
+                        roiList.RemoveAt(index);
+
+                        // 重新排序UI索引
+                        ReorderROIIndices();
+
+                        // 更新DataGridView
+                        UpdateROIGrid();
+
+                        // 强制刷新
+                        dgvROI.Refresh();
+                        Application.DoEvents();
+
+                        // 刷新图片显示
+                        pictureBoxTest.Invalidate();
+                        pictureBoxTemplate.Invalidate();
+
+                        // 如果模板已加载，重新提取ROI模板
+                        if (detector.IsTemplateLoaded() && roiList.Count > 0)
                         {
-                            uiIndexToApiId.Remove(oldUiIndex);
-                            uiIndexToApiId[newUiIndex] = roiList[i].ApiId;
-                            apiIdToUiIndex[roiList[i].ApiId] = newUiIndex;
-                            roiList[i].UiIndex = newUiIndex;
+                            detector.ExtractROITemplates();
                         }
+
+                        AddLog("ROI", $"删除ROI {roi.UiIndex} (API ID:{roi.ApiId})，剩余 {roiList.Count} 个ROI");
                     }
-
-                    UpdateROIGrid();
-                    pictureBoxTest.Invalidate();
-                    pictureBoxTemplate.Invalidate();
-
-                    AddLog("ROI", $"删除ROI {roi.UiIndex} (API ID:{roi.ApiId})");
+                }
+                else
+                {
+                    MessageBox.Show("请先选择要删除的ROI", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
-            else
+            catch (Exception ex)
             {
-                MessageBox.Show("请先选择要删除的ROI", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                AddLog("错误", $"删除ROI失败: {ex.Message}");
+                MessageBox.Show($"删除ROI失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -1273,19 +1458,77 @@ namespace DetectionUITest
 
                 if (result == DialogResult.Yes)
                 {
-                    detector.ClearROIs();
-                    uiIndexToApiId.Clear();
-                    apiIdToUiIndex.Clear();
-                    roiList.Clear();
+                    try
+                    {
+                        detector.ClearROIs();
+                        uiIndexToApiId.Clear();
+                        apiIdToUiIndex.Clear();
+                        roiList.Clear();
 
-                    UpdateROIGrid();
-                    pictureBoxTest.Invalidate();
-                    pictureBoxTemplate.Invalidate();
+                        UpdateROIGrid();
+                        pictureBoxTest.Invalidate();
+                        pictureBoxTemplate.Invalidate();
 
-                    AddLog("ROI", "清除所有ROI");
+                        AddLog("ROI", "清除所有ROI");
+                    }
+                    catch (Exception ex)
+                    {
+                        AddLog("错误", $"清除ROI失败: {ex.Message}");
+                    }
                 }
             }
         }
+
+        private void BtnClearAll_Click(object sender, EventArgs e)
+        {
+            if (testFiles.Count > 0 || imageResults.Count > 0)
+            {
+                var result = MessageBox.Show("确定要清除所有图片和检测结果吗？\n这将清空图片列表、检测结果和统计数据。",
+                    "确认清除", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    ClearAllData();
+                }
+            }
+        }
+
+        private async void BtnSocketConnect_Click(object sender, EventArgs e)
+        {
+            string ip = txtServerIP.Text.Trim();
+            if (!int.TryParse(txtServerPort.Text, out int port) || port <= 0 || port > 65535)
+            {
+                MessageBox.Show("请输入有效的端口号(1-65535)", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            btnSocketConnect.Enabled = false;
+            try
+            {
+                _socketClient.AutoReconnect = chkAutoReconnect.Checked;
+                await _socketClient.StartAsync(ip, port);
+
+                if (_socketClient.IsConnected)
+                {
+                    SaveSocketConfig();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"连接失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                btnSocketConnect.Enabled = true;
+                AddLog("Socket错误", $"连接失败: {ex.Message}");
+            }
+        }
+
+        private void BtnSocketDisconnect_Click(object sender, EventArgs e)
+        {
+            _socketClient.Stop();
+        }
+
+        #endregion
+
+        #region DataGridView事件处理方法
 
         private void DgvROI_CellEndEdit(object sender, DataGridViewCellEventArgs e)
         {
@@ -1302,13 +1545,24 @@ namespace DetectionUITest
                     int oldH = roi.Height;
                     float oldT = roi.Threshold;
 
-                    roi.X = Convert.ToInt32(row.Cells[2].Value);
-                    roi.Y = Convert.ToInt32(row.Cells[3].Value);
-                    roi.Width = Convert.ToInt32(row.Cells[4].Value);
-                    roi.Height = Convert.ToInt32(row.Cells[5].Value);
-                    roi.Threshold = Convert.ToSingle(row.Cells[6].Value);
+                    // 获取新值
+                    if (row.Cells[2].Value != null)
+                        roi.X = Convert.ToInt32(row.Cells[2].Value);
+                    if (row.Cells[3].Value != null)
+                        roi.Y = Convert.ToInt32(row.Cells[3].Value);
+                    if (row.Cells[4].Value != null)
+                        roi.Width = Convert.ToInt32(row.Cells[4].Value);
+                    if (row.Cells[5].Value != null)
+                        roi.Height = Convert.ToInt32(row.Cells[5].Value);
+                    if (row.Cells[6].Value != null)
+                        roi.Threshold = Convert.ToSingle(row.Cells[6].Value);
 
+                    // 更新检测器中的ROI阈值
                     detector.SetROIThreshold(roi.ApiId, roi.Threshold);
+
+                    // 更新检测器中的ROI位置（需要先移除再添加）
+                    // 注意：这里可能需要重新设置ROI位置，如果API支持的话
+                    // 如果不支持，可能需要重新创建ROI
 
                     pictureBoxTest.Invalidate();
 
@@ -1322,6 +1576,98 @@ namespace DetectionUITest
                 }
             }
         }
+
+        private void DgvROI_UserDeletingRow(object sender, DataGridViewRowCancelEventArgs e)
+        {
+            // 阻止直接通过Delete键删除行，强制使用删除按钮
+            e.Cancel = true;
+            MessageBox.Show("请使用'删除ROI'按钮删除选中的ROI", "提示",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void DgvDefects_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0 && currentIndex >= 0 && currentIndex < testFiles.Count)
+            {
+                var currentFile = testFiles[currentIndex];
+                if (imageResults.ContainsKey(currentFile))
+                {
+                    var defects = imageResults[currentFile].Defects;
+                    if (e.RowIndex < defects.Count)
+                    {
+                        var defect = defects[e.RowIndex];
+
+                        Rectangle imageRect = GetImageDisplayRect(pictureBoxTest);
+                        if (imageRect.Width <= 0 || imageRect.Height <= 0 || pictureBoxTest.Image == null)
+                            return;
+
+                        float scaleX = (float)imageRect.Width / pictureBoxTest.Image.Width;
+                        float scaleY = (float)imageRect.Height / pictureBoxTest.Image.Height;
+
+                        int picX = (int)(defect.X * scaleX) + imageRect.X;
+                        int picY = (int)(defect.Y * scaleY) + imageRect.Y;
+
+                        // 闪烁效果
+                        FlashDefectLocation(picX, picY);
+
+                        AddLog("定位", $"跳转到瑕疵: ROI{defect.UiIndex}(ID:{defect.RoiId}) 位置({defect.X:F1},{defect.Y:F1})");
+                    }
+                }
+            }
+        }
+
+        private async void FlashDefectLocation(int x, int y)
+        {
+            try
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    pictureBoxTest.Invalidate();
+                    await Task.Delay(100);
+
+                    using (Graphics g = pictureBoxTest.CreateGraphics())
+                    {
+                        using (Pen flashPen = new Pen(Color.Yellow, 3))
+                        {
+                            g.DrawEllipse(flashPen, x - 10, y - 10, 20, 20);
+                        }
+                    }
+                    await Task.Delay(100);
+                }
+                pictureBoxTest.Invalidate();
+            }
+            catch (Exception ex)
+            {
+                AddLog("错误", $"闪烁效果失败: {ex.Message}");
+            }
+        }
+
+        private void DgvAllResults_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.RowIndex < dgvAllResults.Rows.Count)
+            {
+                string filePath = dgvAllResults.Rows[e.RowIndex].Tag as string;
+                if (!string.IsNullOrEmpty(filePath))
+                {
+                    int index = testFiles.IndexOf(filePath);
+                    if (index >= 0 && index != currentIndex)
+                    {
+                        currentIndex = index;
+                        LoadTestImage(currentIndex);
+                        LoadCurrentImageResults();
+
+                        btnPrev.Enabled = currentIndex > 0;
+                        btnNext.Enabled = currentIndex < testFiles.Count - 1;
+
+                        AddLog("系统", $"跳转到图片: {Path.GetFileName(filePath)}");
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region 控件事件处理方法
 
         private void ChkAutoAlign_CheckedChanged(object sender, EventArgs e)
         {
@@ -1337,31 +1683,55 @@ namespace DetectionUITest
         {
             if (detector == null) return;
 
-            switch (cmbAlignMode.SelectedIndex)
+            try
             {
-                case 0:
-                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.None);
-                    AddLog("配置", "对齐模式: 禁用");
-                    break;
-                case 1:
-                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.FullImage);
-                    AddLog("配置", "对齐模式: 整图对齐");
-                    break;
-                case 2:
-                    detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.RoiOnly);
-                    AddLog("配置", "对齐模式: ROI区域对齐");
-                    break;
+                switch (cmbAlignMode.SelectedIndex)
+                {
+                    case 0:
+                        detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.None);
+                        AddLog("配置", "对齐模式: 禁用");
+                        break;
+                    case 1:
+                        detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.FullImage);
+                        AddLog("配置", "对齐模式: 整图对齐");
+                        break;
+                    case 2:
+                        detector.SetAlignmentMode(DefectDetectorAPI.AlignmentMode.RoiOnly);
+                        AddLog("配置", "对齐模式: ROI区域对齐");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog("错误", $"设置对齐模式失败: {ex.Message}");
             }
         }
 
         private void ChkBinaryOpt_CheckedChanged(object sender, EventArgs e)
         {
             UpdateBinaryParams();
+            AddLog("配置", $"二值化优化: {(chkBinaryOpt.Checked ? "启用" : "禁用")}");
+        }
+
+        private void ChkAutoReconnect_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_socketClient != null)
+            {
+                _socketClient.AutoReconnect = chkAutoReconnect.Checked;
+            }
         }
 
         private void Parameter_ValueChanged(object sender, EventArgs e)
         {
             UpdateBinaryParams();
+        }
+
+        private void Form1_Resize(object sender, EventArgs e)
+        {
+            if (splitContainer2 != null && splitContainer2.Width > 0)
+            {
+                splitContainer2.SplitterDistance = splitContainer2.Width / 2;
+            }
         }
 
         #endregion
@@ -1408,105 +1778,57 @@ namespace DetectionUITest
         {
             if (isDragging && currentROI.Width > 10 && currentROI.Height > 10 && detector != null && detector.IsInitialized)
             {
-                int newUiIndex = roiList.Count + 1;
-
-                // ROI内缩像素数（与demo_cpp一致）
-                const int shrinkPixels = 5;
-                int x = currentROI.X + shrinkPixels;
-                int y = currentROI.Y + shrinkPixels;
-                int width = currentROI.Width - 2 * shrinkPixels;
-                int height = currentROI.Height - 2 * shrinkPixels;
-
-                // 确保内缩后尺寸有效
-                if (width <= 0 || height <= 0)
+                try
                 {
-                    x = currentROI.X;
-                    y = currentROI.Y;
-                    width = currentROI.Width;
-                    height = currentROI.Height;
+                    int newUiIndex = roiList.Count + 1;
+
+                    int x = currentROI.X + SHRINK_PIXELS;
+                    int y = currentROI.Y + SHRINK_PIXELS;
+                    int width = currentROI.Width - 2 * SHRINK_PIXELS;
+                    int height = currentROI.Height - 2 * SHRINK_PIXELS;
+
+                    if (width <= 0 || height <= 0)
+                    {
+                        x = currentROI.X;
+                        y = currentROI.Y;
+                        width = currentROI.Width;
+                        height = currentROI.Height;
+                    }
+
+                    int apiId = detector.AddROI(x, y, width, height, 0.8f);
+
+                    var roi = new ROIItem
+                    {
+                        UiIndex = newUiIndex,
+                        ApiId = apiId,
+                        X = currentROI.X,
+                        Y = currentROI.Y,
+                        Width = currentROI.Width,
+                        Height = currentROI.Height,
+                        Threshold = 0.8f
+                    };
+
+                    roiList.Add(roi);
+                    uiIndexToApiId[roi.UiIndex] = apiId;
+                    apiIdToUiIndex[apiId] = roi.UiIndex;
+
+                    if (detector.IsTemplateLoaded())
+                    {
+                        detector.ExtractROITemplates();
+                    }
+
+                    UpdateROIGrid();
+                    AddLog("ROI", $"手动添加ROI {roi.UiIndex} (API ID:{apiId}): ({x},{y}) {width}x{height} (原始: {roi.X},{roi.Y} {roi.Width}x{roi.Height}, 内缩{SHRINK_PIXELS}px)");
                 }
-
-                int apiId = detector.AddROI(x, y, width, height, 0.8f);
-
-                var roi = new ROIItem
+                catch (Exception ex)
                 {
-                    UiIndex = newUiIndex,
-                    ApiId = apiId,
-                    X = currentROI.X,  // 界面显示原始坐标
-                    Y = currentROI.Y,
-                    Width = currentROI.Width,
-                    Height = currentROI.Height,
-                    Threshold = 0.8f
-                };
-
-                roiList.Add(roi);
-                uiIndexToApiId[roi.UiIndex] = apiId;
-                apiIdToUiIndex[apiId] = roi.UiIndex;
-
-                // 如果模板已加载，提取ROI模板
-                if (detector.IsTemplateLoaded())
-                {
-                    detector.ExtractROITemplates();
+                    AddLog("错误", $"手动添加ROI失败: {ex.Message}");
                 }
-
-                UpdateROIGrid();
-                AddLog("ROI", $"手动添加ROI {roi.UiIndex} (API ID:{apiId}): ({x},{y}) {width}x{height} (原始: {roi.X},{roi.Y} {roi.Width}x{roi.Height}, 内缩{shrinkPixels}px)");
             }
 
             isDragging = false;
             currentROI = Rectangle.Empty;
             pictureBoxTest.Invalidate();
-        }
-
-        private Rectangle GetImageDisplayRect(PictureBox pictureBox)
-        {
-            if (pictureBox.Image == null)
-                return Rectangle.Empty;
-
-            Rectangle clientRect = pictureBox.ClientRectangle;
-            float imageAspect = (float)pictureBox.Image.Width / pictureBox.Image.Height;
-            float clientAspect = (float)clientRect.Width / clientRect.Height;
-
-            int displayWidth, displayHeight, displayX, displayY;
-
-            if (imageAspect > clientAspect)
-            {
-                displayWidth = clientRect.Width;
-                displayHeight = (int)(clientRect.Width / imageAspect);
-                displayX = 0;
-                displayY = (clientRect.Height - displayHeight) / 2;
-            }
-            else
-            {
-                displayHeight = clientRect.Height;
-                displayWidth = (int)(clientRect.Height * imageAspect);
-                displayY = 0;
-                displayX = (clientRect.Width - displayWidth) / 2;
-            }
-
-            return new Rectangle(displayX, displayY, displayWidth, displayHeight);
-        }
-
-        private Point GetImageCoordinates(Point mousePoint)
-        {
-            if (pictureBoxTest.Image == null)
-                return Point.Empty;
-
-            Rectangle imageRect = GetImageDisplayRect(pictureBoxTest);
-
-            if (!imageRect.Contains(mousePoint))
-                return Point.Empty;
-
-            float relativeX = mousePoint.X - imageRect.X;
-            float relativeY = mousePoint.Y - imageRect.Y;
-
-            float scaleX = (float)pictureBoxTest.Image.Width / imageRect.Width;
-            float scaleY = (float)pictureBoxTest.Image.Height / imageRect.Height;
-
-            return new Point(
-                (int)(relativeX * scaleX),
-                (int)(relativeY * scaleY)
-            );
         }
 
         private void PictureBoxTest_Paint(object sender, PaintEventArgs e)
@@ -1527,6 +1849,7 @@ namespace DetectionUITest
                 e.Graphics.TranslateTransform(imageRect.X, imageRect.Y);
                 e.Graphics.ScaleTransform(scaleX, scaleY);
 
+                // 绘制ROI
                 using (Pen roiPen = new Pen(Color.Blue, 2 / scaleX))
                 {
                     foreach (var roi in roiList)
@@ -1550,6 +1873,7 @@ namespace DetectionUITest
                     }
                 }
 
+                // 绘制拖拽中的ROI
                 if (isDragging && currentROI != Rectangle.Empty)
                 {
                     using (Pen dashPen = new Pen(Color.Blue, 2 / scaleX)
@@ -1560,6 +1884,7 @@ namespace DetectionUITest
                     }
                 }
 
+                // 绘制当前图片的瑕疵
                 if (currentIndex >= 0 && currentIndex < testFiles.Count)
                 {
                     string currentFile = testFiles[currentIndex];
@@ -1614,48 +1939,81 @@ namespace DetectionUITest
         {
             if (detector == null || !detector.IsInitialized) return;
 
-            detector.ClearROIs();
-            uiIndexToApiId.Clear();
-            apiIdToUiIndex.Clear();
-
-            // ROI内缩像素数（与demo_cpp一致，避免边缘检测）
-            const int shrinkPixels = 5;
-
-            foreach (var roi in roiList)
+            try
             {
-                // 应用内缩（与demo_cpp一致）
-                int x = roi.X + shrinkPixels;
-                int y = roi.Y + shrinkPixels;
-                int width = roi.Width - 2 * shrinkPixels;
-                int height = roi.Height - 2 * shrinkPixels;
+                detector.ClearROIs();
+                uiIndexToApiId.Clear();
+                apiIdToUiIndex.Clear();
 
-                // 确保内缩后尺寸有效
-                if (width <= 0 || height <= 0)
+                foreach (var roi in roiList)
                 {
-                    x = roi.X;
-                    y = roi.Y;
-                    width = roi.Width;
-                    height = roi.Height;
+                    int x = roi.X + SHRINK_PIXELS;
+                    int y = roi.Y + SHRINK_PIXELS;
+                    int width = roi.Width - 2 * SHRINK_PIXELS;
+                    int height = roi.Height - 2 * SHRINK_PIXELS;
+
+                    if (width <= 0 || height <= 0)
+                    {
+                        x = roi.X;
+                        y = roi.Y;
+                        width = roi.Width;
+                        height = roi.Height;
+                    }
+
+                    int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
+                    roi.ApiId = apiId;
+                    uiIndexToApiId[roi.UiIndex] = apiId;
+                    apiIdToUiIndex[apiId] = roi.UiIndex;
                 }
 
-                int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
-                roi.ApiId = apiId;
-                uiIndexToApiId[roi.UiIndex] = apiId;
-                apiIdToUiIndex[apiId] = roi.UiIndex;
-            }
+                if (detector.IsTemplateLoaded())
+                {
+                    detector.ExtractROITemplates();
+                    AddLog("系统", $"重新应用 {roiList.Count} 个ROI到检测器（内缩{SHRINK_PIXELS}px），已提取ROI模板");
+                }
+                else
+                {
+                    AddLog("系统", $"重新应用 {roiList.Count} 个ROI到检测器（内缩{SHRINK_PIXELS}px），模板未加载跳过提取");
+                }
 
-            // 提取ROI模板图像（关键！与demo_cpp一致）
-            if (detector.IsTemplateLoaded())
-            {
-                detector.ExtractROITemplates();
-                AddLog("系统", $"重新应用 {roiList.Count} 个ROI到检测器（内缩{shrinkPixels}px），已提取ROI模板");
+                UpdateROIGrid();
             }
-            else
+            catch (Exception ex)
             {
-                AddLog("系统", $"重新应用 {roiList.Count} 个ROI到检测器（内缩{shrinkPixels}px），模板未加载跳过提取");
+                AddLog("错误", $"重新应用ROI失败: {ex.Message}");
             }
+        }
 
-            UpdateROIGrid();
+        private void ReorderROIIndices()
+        {
+            try
+            {
+                for (int i = 0; i < roiList.Count; i++)
+                {
+                    int oldUiIndex = roiList[i].UiIndex;
+                    int newUiIndex = i + 1;
+
+                    if (oldUiIndex != newUiIndex)
+                    {
+                        if (uiIndexToApiId.ContainsKey(oldUiIndex))
+                        {
+                            uiIndexToApiId.Remove(oldUiIndex);
+                        }
+                        uiIndexToApiId[newUiIndex] = roiList[i].ApiId;
+
+                        if (apiIdToUiIndex.ContainsKey(roiList[i].ApiId))
+                        {
+                            apiIdToUiIndex[roiList[i].ApiId] = newUiIndex;
+                        }
+
+                        roiList[i].UiIndex = newUiIndex;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog("错误", $"重新排序ROI索引失败: {ex.Message}");
+            }
         }
 
         private void LoadLocationData(string csvPath)
@@ -1719,6 +2077,7 @@ namespace DetectionUITest
             catch (Exception ex)
             {
                 MessageBox.Show($"加载CSV文件失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                AddLog("错误", $"加载CSV文件失败: {ex.Message}");
             }
         }
 
@@ -1744,6 +2103,26 @@ namespace DetectionUITest
                 catch (Exception ex)
                 {
                     MessageBox.Show($"加载图像失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    AddLog("错误", $"加载图像失败: {ex.Message}");
+                }
+            }
+        }
+
+        private void LoadCurrentImageResults()
+        {
+            if (currentIndex >= 0 && currentIndex < testFiles.Count)
+            {
+                string currentFile = testFiles[currentIndex];
+                if (imageResults.ContainsKey(currentFile))
+                {
+                    var result = imageResults[currentFile];
+                    UpdateDefectGrid(result.Defects);
+
+                    AddLog("系统", $"加载图片 {Path.GetFileName(currentFile)} 的检测结果，瑕疵数: {result.Defects.Count}");
+                }
+                else
+                {
+                    dgvDefects.Rows.Clear();
                 }
             }
         }
@@ -1765,14 +2144,14 @@ namespace DetectionUITest
                     EdgeTolerancePixels = (int)nudEdgeTol.Value,
                     EdgeDiffIgnoreRatio = 0.05f,
                     MinSignificantArea = (int)nudMinArea.Value,
-                    AreaDiffThreshold = 0.001f,  // C++默认值: 0.001f
+                    AreaDiffThreshold = 0.001f,
                     OverallSimilarityThreshold = (float)nudSimThresh.Value / 100f,
                     EdgeDefectSizeThreshold = 500,
                     EdgeDistanceMultiplier = 2
                 };
                 detector.SetBinaryDetectionParams(binaryParams);
 
-                detector.SetParameter("min_defect_size", 100);
+                detector.SetParameter("min_defect_size", (int)nudMinArea.Value);
                 detector.SetParameter("blur_kernel_size", 3);
                 detector.SetParameter("detect_black_on_white", 1);
                 detector.SetParameter("detect_white_on_black", 1);
@@ -1800,23 +2179,30 @@ namespace DetectionUITest
         {
             if (detector == null) return;
 
-            string filename = Path.GetFileName(file);
-
-            if (locationDict.TryGetValue(filename, out LocationData testLocation) &&
-                testLocation.IsValid &&
-                templateLocation != null &&
-                templateLocation.IsValid)
+            try
             {
-                float offsetX = testLocation.X - templateLocation.X;
-                float offsetY = testLocation.Y - templateLocation.Y;
-                float rotationDiff = testLocation.Rotation - templateLocation.Rotation;
+                string filename = Path.GetFileName(file);
 
-                detector.SetExternalTransform(offsetX, offsetY, rotationDiff);
-
-                if (isComparing)
+                if (locationDict.TryGetValue(filename, out LocationData testLocation) &&
+                    testLocation.IsValid &&
+                    templateLocation != null &&
+                    templateLocation.IsValid)
                 {
-                    AddLog("定位", $"{filename}: 偏移({offsetX:F1},{offsetY:F1}) 旋转{rotationDiff:F2}°");
+                    float offsetX = testLocation.X - templateLocation.X;
+                    float offsetY = testLocation.Y - templateLocation.Y;
+                    float rotationDiff = testLocation.Rotation - templateLocation.Rotation;
+
+                    detector.SetExternalTransform(offsetX, offsetY, rotationDiff);
+
+                    if (isComparing)
+                    {
+                        AddLog("定位", $"{filename}: 偏移({offsetX:F1},{offsetY:F1}) 旋转{rotationDiff:F2}°");
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                AddLog("错误", $"设置外部变换失败: {ex.Message}");
             }
         }
 
@@ -1827,14 +2213,26 @@ namespace DetectionUITest
                 UpdateBinaryParams();
                 SetExternalTransform(file);
 
-                // 只调用一次检测（与demo_cpp一致）
+                bool hadPreviousResult = imageResults.ContainsKey(file);
+                bool wasPreviousPassed = false;
+
+                if (hadPreviousResult)
+                {
+                    wasPreviousPassed = imageResults[file].Passed;
+                    AddLog("检测", $"图片 {Path.GetFileName(file)} 已有检测结果，将覆盖更新");
+                }
+
                 var detailedResult = await Task.Run(() => detector.DetectFromFileEx(file));
                 var roiResults = detector.GetLastROIResults();
 
-                ProcessResult(file, detailedResult, roiResults);
+                ProcessResult(file, detailedResult, roiResults, hadPreviousResult, wasPreviousPassed);
 
                 detector.ClearExternalTransform();
                 pictureBoxTest.Invalidate();
+
+                LoadCurrentImageResults();
+                UpdateStats();
+                UpdateAllResultsGrid();
             }
             catch (Exception ex)
             {
@@ -1853,11 +2251,18 @@ namespace DetectionUITest
                     UpdateBinaryParams();
                     SetExternalTransform(file);
 
-                    // 只调用一次检测（与demo_cpp一致）
+                    bool hadPreviousResult = imageResults.ContainsKey(file);
+                    bool wasPreviousPassed = false;
+
+                    if (hadPreviousResult)
+                    {
+                        wasPreviousPassed = imageResults[file].Passed;
+                    }
+
                     var detailedResult = await Task.Run(() => detector.DetectFromFileEx(file));
                     var roiResults = detector.GetLastROIResults();
 
-                    ProcessResult(file, detailedResult, roiResults);
+                    ProcessResult(file, detailedResult, roiResults, hadPreviousResult, wasPreviousPassed);
 
                     detector.ClearExternalTransform();
 
@@ -1866,119 +2271,202 @@ namespace DetectionUITest
                     if (i == currentIndex)
                     {
                         pictureBoxTest.Invalidate();
+                        LoadCurrentImageResults();
+                    }
+
+                    if (i % 10 == 0 || i == testFiles.Count - 1)
+                    {
+                        UpdateAllResultsGrid();
                     }
                 }
                 catch (Exception ex)
                 {
                     AddLog("错误", $"{Path.GetFileName(file)} 比较失败: {ex.Message}");
-                    failCount++;
+                    if (!imageResults.ContainsKey(file))
+                    {
+                        failCount++;
+                    }
                 }
 
                 UpdateStats();
             }
 
+            UpdateAllResultsGrid();
             AddLog("系统", "批量比较完成");
         }
 
         private void ProcessResult(string file,
             DefectDetectorAPI.DetectionResultDetailed detailedResult,
-            DefectDetectorAPI.ROIResult[] roiResults)
+            DefectDetectorAPI.ROIResult[] roiResults,
+            bool hadPreviousResult = false,
+            bool wasPreviousPassed = false,
+            string customDisplayName = null)
         {
-            int passedRois = roiResults.Count(r => r.Passed != 0);
-            float minSimilarity = roiResults.Length > 0 ? roiResults.Min(r => r.Similarity) : 0;
-
-            var allDefects = detailedResult?.Defects ?? new DefectDetectorAPI.DefectInfo[0];
-
-            // 与demo_cpp一致的瑕疵尺寸阈值 (demo_cpp中定义为100)
-            const int DEFECT_SIZE_THRESHOLD = 100;
-
-            var convertedDefects = new List<UIDefectInfo>();
-
-            foreach (var defect in allDefects.Where(d => d.Area >= DEFECT_SIZE_THRESHOLD))
+            try
             {
-                if (apiIdToUiIndex.TryGetValue(defect.RoiId, out int uiIndex))
+                int passedRois = roiResults.Count(r => r.Passed != 0);
+                float minSimilarity = roiResults.Length > 0 ? roiResults.Min(r => r.Similarity) : 0;
+
+                var allDefects = detailedResult?.Defects ?? new DefectDetectorAPI.DefectInfo[0];
+
+                var convertedDefects = new List<UIDefectInfo>();
+
+                foreach (var defect in allDefects.Where(d => d.Area >= DEFECT_SIZE_THRESHOLD))
                 {
-                    var roi = roiList.FirstOrDefault(r => r.UiIndex == uiIndex);
-
-                    if (roi != null)
+                    if (apiIdToUiIndex.TryGetValue(defect.RoiId, out int uiIndex))
                     {
-                        float absX = roi.X + defect.X;
-                        float absY = roi.Y + defect.Y;
+                        var roi = roiList.FirstOrDefault(r => r.UiIndex == uiIndex);
 
-                        convertedDefects.Add(new UIDefectInfo
+                        if (roi != null)
                         {
-                            RoiId = defect.RoiId,
-                            UiIndex = uiIndex,
-                            X = absX,
-                            Y = absY,
-                            Width = defect.Width,
-                            Height = defect.Height,
-                            Area = defect.Area,
-                            Type = defect.Type.ToString(),
-                            Severity = defect.Severity,
-                            RelX = defect.X,
-                            RelY = defect.Y
-                        });
+                            float absX = roi.X + defect.X;
+                            float absY = roi.Y + defect.Y;
 
-                        if (isComparing)
+                            convertedDefects.Add(new UIDefectInfo
+                            {
+                                RoiId = defect.RoiId,
+                                UiIndex = uiIndex,
+                                X = absX,
+                                Y = absY,
+                                Width = defect.Width,
+                                Height = defect.Height,
+                                Area = defect.Area,
+                                Type = defect.Type.ToString(),
+                                Severity = defect.Severity,
+                                RelX = defect.X,
+                                RelY = defect.Y
+                            });
+
+                            if (isComparing)
+                            {
+                                AddLog("坐标转换", $"ROI{uiIndex}(ID:{defect.RoiId}): ROI位置({roi.X},{roi.Y}), " +
+                                       $"瑕疵相对({defect.X:F1},{defect.Y:F1}) -> 绝对({absX:F1},{absY:F1})");
+                            }
+                        }
+                        else
                         {
-                            AddLog("坐标转换", $"ROI{uiIndex}(ID:{defect.RoiId}): ROI位置({roi.X},{roi.Y}), " +
-                                   $"瑕疵相对({defect.X:F1},{defect.Y:F1}) -> 绝对({absX:F1},{absY:F1})");
+                            AddLog("警告", $"找不到UI索引 {uiIndex} 对应的ROI信息");
                         }
                     }
                     else
                     {
-                        AddLog("警告", $"找不到UI索引 {uiIndex} 对应的ROI信息");
+                        AddLog("警告", $"找不到API ID {defect.RoiId} 对应的UI索引");
                     }
                 }
-                else
+
+                bool hasSignificantDefects = convertedDefects.Any();
+                bool finalPass = !hasSignificantDefects;
+
+                if (hadPreviousResult)
                 {
-                    AddLog("警告", $"找不到API ID {defect.RoiId} 对应的UI索引");
+                    if (wasPreviousPassed)
+                        passCount--;
+                    else
+                        failCount--;
+
+                    AddLog("检测", $"调整计数: 移除之前的结果 ({(wasPreviousPassed ? "通过" : "失败")})");
+                }
+
+                if (finalPass)
+                    passCount++;
+                else
+                    failCount++;
+
+                var localization = detector.GetLastLocalizationInfo();
+
+                var imageResult = new ImageResult
+                {
+                    FileName = file,
+                    DisplayName = customDisplayName,
+                    Passed = finalPass,
+                    PassedROIs = passedRois,
+                    TotalROIs = roiResults.Length,
+                    MinSimilarity = minSimilarity,
+                    Defects = convertedDefects,
+                    ProcessingTime = detailedResult.ProcessingTime,
+                    Localization = localization,
+                    ResultCode = detailedResult.ResultCode
+                };
+
+                imageResults[file] = imageResult;
+
+                string status = finalPass ? "通过" : "失败";
+                string defectInfo = convertedDefects.Any() ? $", 瑕疵:{convertedDefects.Count}" : "";
+                string alignInfo = "";
+                string updateInfo = hadPreviousResult ? " (更新)" : "";
+
+                if (localization.Success != 0)
+                {
+                    alignInfo = $", 偏移({localization.OffsetX:F1},{localization.OffsetY:F1}) " +
+                               $"旋转:{localization.RotationAngle:F2}°";
+                }
+
+                string displayFileName = customDisplayName ?? Path.GetFileName(file);
+                AddLog("检测", $"{displayFileName} - {status}{updateInfo}, 相似度:{minSimilarity * 100:F1}%, " +
+                       $"耗时:{detailedResult.ProcessingTime:F1}ms{defectInfo}{alignInfo}");
+
+                if (currentIndex >= 0 && currentIndex < testFiles.Count && testFiles[currentIndex] == file)
+                {
+                    UpdateDefectGrid(convertedDefects);
                 }
             }
-
-            // 与demo_cpp一致的结果判定：只根据瑕疵面积判断
-            bool hasSignificantDefects = convertedDefects.Any();
-            bool finalPass = !hasSignificantDefects;
-
-            if (finalPass)
-                passCount++;
-            else
-                failCount++;
-
-            // 获取定位信息（从ROI结果或detailedResult）
-            var localization = detector.GetLastLocalizationInfo();
-
-            var imageResult = new ImageResult
+            catch (Exception ex)
             {
-                FileName = file,
-                Passed = finalPass,
-                PassedROIs = passedRois,
-                TotalROIs = roiResults.Length,
-                MinSimilarity = minSimilarity,
-                Defects = convertedDefects,
-                ProcessingTime = detailedResult.ProcessingTime,
-                Localization = localization,
-                ResultCode = detailedResult.ResultCode
-            };
-
-            imageResults[file] = imageResult;
-
-            string status = finalPass ? "通过" : "失败";
-            string defectInfo = convertedDefects.Any() ? $", 瑕疵:{convertedDefects.Count}" : "";
-            string alignInfo = "";
-
-            if (localization.Success != 0)
-            {
-                alignInfo = $", 偏移({localization.OffsetX:F1},{localization.OffsetY:F1}) " +
-                           $"旋转:{localization.RotationAngle:F2}°";
+                AddLog("错误", $"处理结果失败: {ex.Message}");
             }
-
-            AddLog("检测", $"{Path.GetFileName(file)} - {status}, 相似度:{minSimilarity * 100:F1}%, " +
-                   $"耗时:{detailedResult.ProcessingTime:F1}ms{defectInfo}{alignInfo}");
-
-            UpdateDefectGrid(convertedDefects);
         }
+
+        private float GetMinSimilarity(ROIResult[] results)
+        {
+            if (results == null || results.Length == 0) return 1.0f;
+            return results.Min(r => r.Similarity);
+        }
+
+        private void ClearAllData()
+        {
+            try
+            {
+                testFiles.Clear();
+                imageResults.Clear();
+
+                passCount = 0;
+                failCount = 0;
+                socketImageCounter = 0;
+
+                currentIndex = -1;
+
+                if (pictureBoxTest.Image != null)
+                {
+                    pictureBoxTest.Image.Dispose();
+                    pictureBoxTest.Image = null;
+                }
+
+                dgvDefects.Rows.Clear();
+
+                UpdateAllResultsGrid();
+                UpdateStats();
+
+                lblTotalCount.Text = "总计: 0";
+                lblCurrentImage.Text = "当前: 未选择";
+
+                btnPrev.Enabled = false;
+                btnNext.Enabled = false;
+                btnSingleCompare.Enabled = !string.IsNullOrEmpty(templateFile) && testFiles.Count > 0;
+                btnContinuousCompare.Enabled = !string.IsNullOrEmpty(templateFile) && testFiles.Count > 0;
+
+                pictureBoxTest.Invalidate();
+
+                AddLog("系统", "已清除所有图片和检测结果");
+            }
+            catch (Exception ex)
+            {
+                AddLog("错误", $"清除数据失败: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region UI更新方法
 
         private void UpdateROIGrid()
         {
@@ -1995,7 +2483,7 @@ namespace DetectionUITest
 
                 foreach (var roi in roiList)
                 {
-                    dgvROI.Rows.Add(
+                    int rowIndex = dgvROI.Rows.Add(
                         roi.UiIndex,
                         roi.ApiId,
                         roi.X,
@@ -2004,10 +2492,17 @@ namespace DetectionUITest
                         roi.Height,
                         roi.Threshold
                     );
+                    dgvROI.Rows[rowIndex].Tag = roi;
                 }
 
                 int totalTestFiles = testFiles.Count;
                 lblTotalCount.Text = $"总计: {totalTestFiles} | ROI: {roiList.Count}";
+
+                AddLog("调试", $"更新ROI表格: 当前 {roiList.Count} 行");
+            }
+            catch (Exception ex)
+            {
+                AddLog("错误", $"更新ROI表格失败: {ex.Message}");
             }
             finally
             {
@@ -2033,7 +2528,6 @@ namespace DetectionUITest
                 {
                     dgvDefects.Rows.Add(
                         defect.UiIndex,
-                        defect.RoiId,
                         defect.X.ToString("F1"),
                         defect.Y.ToString("F1"),
                         defect.Width.ToString("F1"),
@@ -2051,47 +2545,43 @@ namespace DetectionUITest
             }
         }
 
-        private void DgvDefects_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        private void UpdateAllResultsGrid()
         {
-            if (e.RowIndex >= 0 && currentIndex >= 0 && currentIndex < testFiles.Count)
+            if (dgvAllResults.InvokeRequired)
             {
-                var currentFile = testFiles[currentIndex];
-                if (imageResults.ContainsKey(currentFile))
+                dgvAllResults.Invoke(new Action(UpdateAllResultsGrid));
+                return;
+            }
+
+            try
+            {
+                dgvAllResults.SuspendLayout();
+                dgvAllResults.Rows.Clear();
+
+                var sortedResults = imageResults.OrderBy(kv => kv.Value.DisplayName ?? Path.GetFileName(kv.Key));
+
+                foreach (var kv in sortedResults)
                 {
-                    var defects = imageResults[currentFile].Defects;
-                    if (e.RowIndex < defects.Count)
-                    {
-                        var defect = defects[e.RowIndex];
+                    var result = kv.Value;
+                    string fileName = result.DisplayName ?? Path.GetFileName(kv.Key);
+                    string similarity = result.MinSimilarity > 0 ? (result.MinSimilarity * 100).ToString("F1") : "-";
+                    string defectCount = result.Defects.Count > 0 ? result.Defects.Count.ToString() : "0";
+                    string resultText = result.Passed ? "通过" : "失败";
+                    Color resultColor = result.Passed ? Color.Green : Color.Red;
 
-                        Rectangle imageRect = GetImageDisplayRect(pictureBoxTest);
-                        float scaleX = (float)imageRect.Width / pictureBoxTest.Image.Width;
-                        float scaleY = (float)imageRect.Height / pictureBoxTest.Image.Height;
+                    int rowIndex = dgvAllResults.Rows.Add(fileName, similarity, defectCount, resultText);
+                    dgvAllResults.Rows[rowIndex].Cells["Result"].Style.ForeColor = resultColor;
+                    dgvAllResults.Rows[rowIndex].Cells["Result"].Style.Font = new Font(dgvAllResults.Font, FontStyle.Bold);
 
-                        int picX = (int)(defect.X * scaleX) + imageRect.X;
-                        int picY = (int)(defect.Y * scaleY) + imageRect.Y;
-
-                        Task.Run(async () =>
-                        {
-                            for (int i = 0; i < 3; i++)
-                            {
-                                pictureBoxTest.Invalidate();
-                                await Task.Delay(100);
-
-                                using (Graphics g = pictureBoxTest.CreateGraphics())
-                                {
-                                    using (Pen flashPen = new Pen(Color.Yellow, 3))
-                                    {
-                                        g.DrawEllipse(flashPen, picX - 10, picY - 10, 20, 20);
-                                    }
-                                }
-                                await Task.Delay(100);
-                            }
-                            pictureBoxTest.Invalidate();
-                        });
-
-                        AddLog("定位", $"跳转到瑕疵: ROI{defect.UiIndex}(ID:{defect.RoiId}) 位置({defect.X:F1},{defect.Y:F1})");
-                    }
+                    dgvAllResults.Rows[rowIndex].Tag = kv.Key;
                 }
+
+                lblTotalCount.Text = $"总计: {testFiles.Count} | 已检: {imageResults.Count}";
+            }
+            finally
+            {
+                dgvAllResults.ResumeLayout();
+                dgvAllResults.Refresh();
             }
         }
 
@@ -2118,60 +2608,111 @@ namespace DetectionUITest
                 return;
             }
 
-            ListViewItem item = new ListViewItem(DateTime.Now.ToString("HH:mm:ss"));
-            item.SubItems.Add(type);
-            item.SubItems.Add(message);
-
-            if (type == "错误")
-                item.ForeColor = Color.Red;
-            else if (type == "检测" && message.Contains("失败"))
-                item.ForeColor = Color.Red;
-            else if (type == "检测" && message.Contains("通过"))
-                item.ForeColor = Color.Green;
-            else if (type == "系统")
-                item.ForeColor = Color.Blue;
-            else if (type == "坐标转换")
-                item.ForeColor = Color.Orange;
-            else if (type == "警告")
-                item.ForeColor = Color.OrangeRed;
-            else if (type == "ROI")
-                item.ForeColor = Color.Purple;
-            else if (type == "定位")
-                item.ForeColor = Color.Teal;
-            else if (type == "Socket" && message.Contains("成功"))
-                item.ForeColor = Color.Green;
-            else if (type == "Socket" && message.Contains("失败"))
-                item.ForeColor = Color.Red;
-            else if (type == "Socket")
-                item.ForeColor = Color.DarkCyan;
-
-            listViewLog.Items.Insert(0, item);
-
-            while (listViewLog.Items.Count > 1000)
+            try
             {
-                listViewLog.Items.RemoveAt(listViewLog.Items.Count - 1);
+                ListViewItem item = new ListViewItem(DateTime.Now.ToString("HH:mm:ss"));
+                item.SubItems.Add(type);
+                item.SubItems.Add(message);
+
+                // 设置颜色
+                if (type == "错误")
+                    item.ForeColor = Color.Red;
+                else if (type == "检测" && message.Contains("失败"))
+                    item.ForeColor = Color.Red;
+                else if (type == "检测" && message.Contains("通过"))
+                    item.ForeColor = Color.Green;
+                else if (type == "系统")
+                    item.ForeColor = Color.Blue;
+                else if (type == "坐标转换")
+                    item.ForeColor = Color.Orange;
+                else if (type == "警告")
+                    item.ForeColor = Color.OrangeRed;
+                else if (type == "ROI")
+                    item.ForeColor = Color.Purple;
+                else if (type == "定位")
+                    item.ForeColor = Color.Teal;
+                else if (type == "Socket" && message.Contains("成功"))
+                    item.ForeColor = Color.Green;
+                else if (type == "Socket" && message.Contains("失败"))
+                    item.ForeColor = Color.Red;
+                else if (type == "Socket")
+                    item.ForeColor = Color.DarkCyan;
+                else if (type == "调试")
+                    item.ForeColor = Color.Gray;
+
+                listViewLog.Items.Insert(0, item);
+
+                // 限制日志数量
+                while (listViewLog.Items.Count > 1000)
+                {
+                    listViewLog.Items.RemoveAt(listViewLog.Items.Count - 1);
+                }
+
+                toolStripStatusLabel.Text = message;
+            }
+            catch (Exception ex)
+            {
+                // 避免递归
+                Console.WriteLine($"添加日志失败: {ex.Message}");
+            }
+        }
+
+        private Rectangle GetImageDisplayRect(PictureBox pictureBox)
+        {
+            if (pictureBox.Image == null)
+                return Rectangle.Empty;
+
+            Rectangle clientRect = pictureBox.ClientRectangle;
+            float imageAspect = (float)pictureBox.Image.Width / pictureBox.Image.Height;
+            float clientAspect = (float)clientRect.Width / clientRect.Height;
+
+            int displayWidth, displayHeight, displayX, displayY;
+
+            if (imageAspect > clientAspect)
+            {
+                displayWidth = clientRect.Width;
+                displayHeight = (int)(clientRect.Width / imageAspect);
+                displayX = 0;
+                displayY = (clientRect.Height - displayHeight) / 2;
+            }
+            else
+            {
+                displayHeight = clientRect.Height;
+                displayWidth = (int)(clientRect.Height * imageAspect);
+                displayY = 0;
+                displayX = (clientRect.Width - displayWidth) / 2;
             }
 
-            toolStripStatusLabel.Text = message;
+            return new Rectangle(displayX, displayY, displayWidth, displayHeight);
+        }
+
+        private Point GetImageCoordinates(Point mousePoint)
+        {
+            if (pictureBoxTest.Image == null)
+                return Point.Empty;
+
+            Rectangle imageRect = GetImageDisplayRect(pictureBoxTest);
+
+            if (!imageRect.Contains(mousePoint))
+                return Point.Empty;
+
+            float relativeX = mousePoint.X - imageRect.X;
+            float relativeY = mousePoint.Y - imageRect.Y;
+
+            float scaleX = (float)pictureBoxTest.Image.Width / imageRect.Width;
+            float scaleY = (float)pictureBoxTest.Image.Height / imageRect.Height;
+
+            return new Point(
+                (int)(relativeX * scaleX),
+                (int)(relativeY * scaleY)
+            );
         }
 
         #endregion
 
         #region 辅助类
 
-        public class LocationData
-        {
-            public string Filename { get; set; }
-            public float X { get; set; }
-            public float Y { get; set; }
-            public float Rotation { get; set; }
-            public bool IsValid { get; set; }
-
-            public override string ToString()
-            {
-                return IsValid ? $"({X:F2}, {Y:F2}) 旋转={Rotation:F3}°" : "无效数据";
-            }
-        }
+        // LocationData类已移至DefectDetectionAPI.cs，使用API中的定义
 
         public class ROIItem
         {
@@ -2202,6 +2743,7 @@ namespace DetectionUITest
         public class ImageResult
         {
             public string FileName { get; set; }
+            public string DisplayName { get; set; }
             public bool Passed { get; set; }
             public int PassedROIs { get; set; }
             public int TotalROIs { get; set; }
@@ -2218,33 +2760,35 @@ namespace DetectionUITest
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            _autoConnectCts?.Cancel();
-            _autoConnectCts?.Dispose();
-
-            if (isComparing)
+            try
             {
-                cancellationTokenSource?.Cancel();
-                System.Threading.Thread.Sleep(500);
+                _autoConnectCts?.Cancel();
+                _autoConnectCts?.Dispose();
+
+                if (isComparing)
+                {
+                    cancellationTokenSource?.Cancel();
+                    System.Threading.Thread.Sleep(500);
+                }
+
+                _socketClient?.Dispose();
+
+                if (pictureBoxTemplate.Image != null)
+                    pictureBoxTemplate.Image.Dispose();
+
+                if (pictureBoxTest.Image != null)
+                    pictureBoxTest.Image.Dispose();
+
+                detector?.Dispose();
             }
-
-            _socketClient?.Dispose();
-
-            if (pictureBoxTemplate.Image != null)
-                pictureBoxTemplate.Image.Dispose();
-
-            if (pictureBoxTest.Image != null)
-                pictureBoxTest.Image.Dispose();
-
-            detector?.Dispose();
+            catch (Exception ex)
+            {
+                Console.WriteLine($"关闭窗体时出错: {ex.Message}");
+            }
 
             base.OnFormClosing(e);
         }
 
         #endregion
-
-        private void Form1_Resize(object sender, EventArgs e)
-        {
-            splitContainer2.SplitterDistance = splitContainer2.Width / 2;
-        }
     }
 }

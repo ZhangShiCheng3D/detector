@@ -160,12 +160,21 @@ target_link_libraries(test_detection_with_log
     ${OpenCV_LIBS}
 )
 
-# C#风格演示程序（带CSV定位数据）
+# C#风格演示程序（带CSV定位数据）- 直接链接静态库
 add_executable(demo_cpp
     tests/demo_cpp.cpp
 )
 target_link_libraries(demo_cpp
     defect_detection_core
+    ${OpenCV_LIBS}
+)
+
+# DLL API 演示程序 - 动态加载DLL
+add_executable(demo_dll
+    tests/demo_dll.cpp
+)
+# demo_dll 动态加载DLL，不需要链接defect_detection库
+target_link_libraries(demo_dll
     ${OpenCV_LIBS}
 )
 
