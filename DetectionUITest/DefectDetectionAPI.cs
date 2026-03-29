@@ -1951,7 +1951,7 @@ namespace DetectionUITest
         public bool EdgeFilterEnabled { get; set; } = true;
         public float EdgeDiffIgnoreRatio { get; set; } = 0.05f;
         public int MinSignificantArea { get; set; } = DefectDetectorAPI.DEFAULT_MIN_SIGNIFICANT_AREA;
-        public float AreaDiffThreshold { get; set; } = 0.001f;
+        public float AreaDiffThreshold { get; set; } = 0.01f;
         public float OverallSimilarityThreshold { get; set; } = DefectDetectorAPI.DEFAULT_OVERALL_SIMILARITY_THRESHOLD;
         public int EdgeDefectSizeThreshold { get; set; } = DefectDetectorAPI.DEFAULT_EDGE_DEFECT_SIZE_THRESHOLD;
         public float EdgeDistanceMultiplier { get; set; } = DefectDetectorAPI.DEFAULT_EDGE_DISTANCE_MULTIPLIER;

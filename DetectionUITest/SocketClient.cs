@@ -23,7 +23,7 @@ namespace DetectionUITest
         public string ServerIp { get; set; }
         public int ServerPort { get; set; }
         public bool IsConnected => _isConnected;
-        public bool AutoReconnect { get; set; } = true;
+        public bool AutoReconnect { get; set; } = false;
         public bool IsConnecting { get; private set; } = false;
         public SocketClient()
         {
@@ -48,7 +48,7 @@ namespace DetectionUITest
             _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
 
             // 等待一小段时间，看是否连接成功
-            await Task.Delay(100);
+            await Task.Delay(1000);
             IsConnecting = false;
         }
 
@@ -83,9 +83,19 @@ namespace DetectionUITest
             {
                 try
                 {
-                    if (!_isConnected)
+                    //if (!_isConnected)
+                    //{
+                    //    await ConnectAsync(cancellationToken);
+                    //}
+
+                    if (AutoReconnect && !cancellationToken.IsCancellationRequested)
                     {
-                        await ConnectAsync(cancellationToken);
+                        LogMessage?.Invoke(this, "尝试重新连接...");
+                        await Task.Delay(3000, cancellationToken);
+                    }
+                    else
+                    {
+                        await Task.Delay(1000, cancellationToken);
                     }
 
                     if (_isConnected && _stream != null && _stream.CanRead)

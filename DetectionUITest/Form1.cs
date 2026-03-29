@@ -582,7 +582,19 @@ namespace DetectionUITest
                         height = roi.Height;
                     }
 
-                    int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
+                    // 使用AddROIWithParams与demo_dll.cpp保持一致
+                    var detectionParams = new DefectDetectorAPI.DetectionParams
+                    {
+                        BinaryThreshold = (int)nudBinaryThreshold.Value,
+                        BlurKernelSize = 3,
+                        MinDefectSize = (int)nudMinArea.Value,
+                        DetectBlackOnWhite = true,
+                        DetectWhiteOnBlack = true,
+                        SimilarityThreshold = roi.Threshold,
+                        MorphologyKernelSize = 3
+                    };
+
+                    int apiId = detector.AddROIWithParams(x, y, width, height, roi.Threshold, detectionParams);
                     roi.ApiId = apiId;
                     uiIndexToApiId[roi.UiIndex] = apiId;
                     apiIdToUiIndex[apiId] = roi.UiIndex;
@@ -942,7 +954,19 @@ namespace DetectionUITest
                                 height = roi.Height;
                             }
 
-                            int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
+                            // 使用AddROIWithParams与demo_dll.cpp保持一致
+                            var detectionParams = new DefectDetectorAPI.DetectionParams
+                            {
+                                BinaryThreshold = (int)nudBinaryThreshold.Value,
+                                BlurKernelSize = 3,
+                                MinDefectSize = (int)nudMinArea.Value,
+                                DetectBlackOnWhite = true,
+                                DetectWhiteOnBlack = true,
+                                SimilarityThreshold = roi.Threshold,
+                                MorphologyKernelSize = 3
+                            };
+
+                            int apiId = detector.AddROIWithParams(x, y, width, height, roi.Threshold, detectionParams);
 
                             var newRoi = new ROIItem
                             {
@@ -1358,7 +1382,19 @@ namespace DetectionUITest
                     height = roi.Height;
                 }
 
-                int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
+                // 使用AddROIWithParams与demo_dll.cpp保持一致
+                var detectionParams = new DefectDetectorAPI.DetectionParams
+                {
+                    BinaryThreshold = (int)nudBinaryThreshold.Value,
+                    BlurKernelSize = 3,
+                    MinDefectSize = (int)nudMinArea.Value,
+                    DetectBlackOnWhite = true,
+                    DetectWhiteOnBlack = true,
+                    SimilarityThreshold = roi.Threshold,
+                    MorphologyKernelSize = 3
+                };
+
+                int apiId = detector.AddROIWithParams(x, y, width, height, roi.Threshold, detectionParams);
                 roi.ApiId = apiId;
                 roiList.Add(roi);
 
@@ -1795,7 +1831,19 @@ namespace DetectionUITest
                         height = currentROI.Height;
                     }
 
-                    int apiId = detector.AddROI(x, y, width, height, 0.8f);
+                    // 使用AddROIWithParams与demo_dll.cpp保持一致
+                    var detectionParams = new DefectDetectorAPI.DetectionParams
+                    {
+                        BinaryThreshold = (int)nudBinaryThreshold.Value,
+                        BlurKernelSize = 3,
+                        MinDefectSize = (int)nudMinArea.Value,
+                        DetectBlackOnWhite = true,
+                        DetectWhiteOnBlack = true,
+                        SimilarityThreshold = 0.8f,
+                        MorphologyKernelSize = 3
+                    };
+
+                    int apiId = detector.AddROIWithParams(x, y, width, height, 0.8f, detectionParams);
 
                     var roi = new ROIItem
                     {
@@ -1945,6 +1993,18 @@ namespace DetectionUITest
                 uiIndexToApiId.Clear();
                 apiIdToUiIndex.Clear();
 
+                // 创建与demo_dll.cpp一致的检测参数
+                var detectionParams = new DefectDetectorAPI.DetectionParams
+                {
+                    BinaryThreshold = (int)nudBinaryThreshold.Value,
+                    BlurKernelSize = 3,
+                    MinDefectSize = (int)nudMinArea.Value,
+                    DetectBlackOnWhite = true,
+                    DetectWhiteOnBlack = true,
+                    SimilarityThreshold = roiList.Count > 0 ? roiList[0].Threshold : 0.8f,
+                    MorphologyKernelSize = 3
+                };
+
                 foreach (var roi in roiList)
                 {
                     int x = roi.X + SHRINK_PIXELS;
@@ -1960,7 +2020,8 @@ namespace DetectionUITest
                         height = roi.Height;
                     }
 
-                    int apiId = detector.AddROI(x, y, width, height, roi.Threshold);
+                    // 使用AddROIWithParams与demo_dll.cpp保持一致
+                    int apiId = detector.AddROIWithParams(x, y, width, height, roi.Threshold, detectionParams);
                     roi.ApiId = apiId;
                     uiIndexToApiId[roi.UiIndex] = apiId;
                     apiIdToUiIndex[apiId] = roi.UiIndex;
@@ -2144,7 +2205,7 @@ namespace DetectionUITest
                     EdgeTolerancePixels = (int)nudEdgeTol.Value,
                     EdgeDiffIgnoreRatio = 0.05f,
                     MinSignificantArea = (int)nudMinArea.Value,
-                    AreaDiffThreshold = 0.001f,
+                    AreaDiffThreshold = 0.01f,
                     OverallSimilarityThreshold = (float)nudSimThresh.Value / 100f,
                     EdgeDefectSizeThreshold = 500,
                     EdgeDistanceMultiplier = 2
